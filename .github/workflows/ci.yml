@@ -40,6 +40,9 @@ jobs:
   test:
     name: vitest unit-tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,4 +51,34 @@ jobs:
       - name: npm install (dr-player)
         run: npm install
       - name: Run vitest
-        run: npm test
+        id: vitest
+        run: npm test 2>&1 | tee vitest-output.log; exit ${PIPESTATUS[0]}
+      - name: Debug on test failure (create issue)
+        if: failure() && steps.vitest.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## CI test-job failure debug"
+            echo ""
+            echo "- **Commit:** \`$GITHUB_SHA\`"
+            echo "- **Workflow run:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- **Runner:** $RUNNER_OS, Node $(node --version)"
+            echo ""
+            echo "### Installed deps"
+            echo "- jszip: \`$(node -p "require('jszip/package.json').version" 2>/dev/null || echo MISSING)\`"
+            echo "- jsdom: \`$(node -p "require('jsdom/package.json').version" 2>/dev/null || echo MISSING)\`"
+            echo "- vitest: \`$(node -p "require('vitest/package.json').version" 2>/dev/null || echo MISSING)\`"
+            echo ""
+            echo "### vitest stdout/stderr"
+            echo ""
+            echo '```'
+            sed 's/`/_/g' vitest-output.log 2>/dev/null | head -300 || echo "(no vitest output captured)"
+            echo '```'
+            echo ""
+            echo "_Issue создан автоматически workflow'ом dr-player/CI — auto-close после fix'а._"
+          } > /tmp/debug.md
+          gh issue create \
+            --title "CI debug: $(date +%Y-%m-%d) ${GITHUB_SHA:0:7}" \
+            --body-file /tmp/debug.md \
+            --repo "$GITHUB_REPOSITORY"
