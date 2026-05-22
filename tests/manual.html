@@ -3,21 +3,25 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>dr-player — Stage 2 skeleton test</title>
+  <title>dr-player — Stage 3 manual test</title>
   <style>
+    html, body { background: #fff; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      max-width: 720px;
+      max-width: 820px;
       margin: 32px auto;
       padding: 0 16px;
       color: #222;
     }
+    h1 { margin-bottom: 4px; }
+    h3 { margin-top: 28px; }
     pre {
       background: #f5f5f5;
       padding: 12px;
       border-radius: 6px;
       overflow-x: auto;
       font-size: 13px;
+      max-height: 280px;
     }
     .status {
       padding: 12px;
@@ -26,28 +30,73 @@
     }
     .status.ok { background: #d4edda; color: #155724; }
     .status.fail { background: #f8d7da; color: #721c24; }
+    .status.info { background: #d1ecf1; color: #0c5460; }
     button {
-      padding: 8px 16px;
+      padding: 8px 14px;
       border-radius: 4px;
       border: 1px solid #ccc;
       background: #fff;
       cursor: pointer;
       margin-right: 8px;
+      margin-bottom: 8px;
+      font-size: 14px;
     }
     button:hover { background: #f0f0f0; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .file-label {
+      display: inline-block;
+      padding: 8px 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      background: #fff;
+      font-size: 14px;
+    }
+    .file-label:hover { background: #f0f0f0; }
+    .file-label input { display: none; }
+    .payload-box {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 12px;
+      margin-top: 8px;
+      background: #fafafa;
+    }
+    .payload-box.loaded { border-color: #28a745; background: #f0fdf4; }
+    .payload-box.error { border-color: #dc3545; background: #fff5f5; }
+    .payload-box h4 { margin: 0 0 6px 0; font-size: 14px; }
+    .payload-box pre { background: transparent; padding: 0; margin: 0; }
+    code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
   </style>
 </head>
 <body>
-  <h1>dr-player — Stage 2 skeleton</h1>
-  <p>Локальная тест-страница для проверки что Stage 2 skeleton собирается и инициализируется.
-  Реальные load / mount / runtime появятся в Stages 3-6.</p>
+  <h1>dr-player — Stage 3 manual test</h1>
+  <p>Проверка <code>Player.load(.dr.zip)</code>. Подгрузи синтетический fixture
+  (кнопка ниже) или собственный <code>.dr.zip</code> через file picker.
+  Реальный mount + render появятся в Stage 4 эпика.</p>
 
   <div id="status" class="status">Ожидание загрузки bundle…</div>
 
-  <h3>Действия</h3>
-  <button id="btn-new">new DrPlayer.Player()</button>
-  <button id="btn-load">player.load(stage2.dr.zip) — должно throw</button>
-  <button id="btn-mount">player.mount(...) — должно throw</button>
+  <h3>Источник .dr.zip</h3>
+  <div class="row">
+    <button id="btn-fixture">Загрузить tests/fixtures/stage3.dr.zip</button>
+    <label class="file-label">
+      Выбрать .dr.zip с диска…
+      <input type="file" id="file-input" accept=".dr.zip,.zip" />
+    </label>
+    <button id="btn-reload">Сброс (new Player)</button>
+  </div>
+
+  <h3>Событие <code>loaded</code></h3>
+  <div id="payload-loaded" class="payload-box">
+    <h4>Ожидаем…</h4>
+    <pre>—</pre>
+  </div>
+
+  <h3>Событие <code>error</code></h3>
+  <div id="payload-error" class="payload-box">
+    <h4>Ожидаем…</h4>
+    <pre>—</pre>
+  </div>
 
   <h3>Console output</h3>
   <pre id="console"></pre>
@@ -56,6 +105,11 @@
   <script>
     const $status = document.getElementById('status');
     const $console = document.getElementById('console');
+    const $payloadLoaded = document.getElementById('payload-loaded');
+    const $payloadError = document.getElementById('payload-error');
+    const $btnFixture = document.getElementById('btn-fixture');
+    const $btnReload = document.getElementById('btn-reload');
+    const $fileInput = document.getElementById('file-input');
 
     function log(msg, kind) {
       const ts = new Date().toISOString().slice(11, 23);
@@ -70,6 +124,23 @@
       $status.className = `status ${kind}`;
     }
 
+    function renderPayload(box, kind, payload) {
+      box.className = `payload-box ${kind}`;
+      box.querySelector('h4').textContent = kind === 'loaded'
+        ? '✅ loaded'
+        : (kind === 'error' ? '❌ error' : '—');
+      box.querySelector('pre').textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function clearPayloads() {
+      $payloadLoaded.className = 'payload-box';
+      $payloadLoaded.querySelector('h4').textContent = 'Ожидаем…';
+      $payloadLoaded.querySelector('pre').textContent = '—';
+      $payloadError.className = 'payload-box';
+      $payloadError.querySelector('h4').textContent = 'Ожидаем…';
+      $payloadError.querySelector('pre').textContent = '—';
+    }
+
     if (typeof DrPlayer === 'undefined' || !DrPlayer.Player) {
       setStatus('FAIL: DrPlayer global или DrPlayer.Player не определены — bundle не загрузился.', 'fail');
       log('DrPlayer global отсутствует', 'error');
@@ -80,39 +151,53 @@
 
     let player = null;
 
-    document.getElementById('btn-new').addEventListener('click', () => {
+    function ensurePlayer() {
+      if (player) return player;
+      player = new DrPlayer.Player();
+      player.on('loaded', (payload) => {
+        log(`event loaded: layerCount=${payload.layerCount}, triggers=[${payload.triggers.join(', ')}]`);
+        renderPayload($payloadLoaded, 'loaded', payload);
+      });
+      player.on('error', (payload) => {
+        log(`event error: code=${payload.code} message="${payload.message}"`, 'error');
+        renderPayload($payloadError, 'error', payload);
+      });
+      return player;
+    }
+
+    $btnFixture.addEventListener('click', async () => {
+      clearPayloads();
+      const p = ensurePlayer();
       try {
-        player = new DrPlayer.Player();
-        log('new DrPlayer.Player() — OK (см. browser console для skeleton-сообщения)');
+        log('player.load("fixtures/stage3.dr.zip")…');
+        await p.load('fixtures/stage3.dr.zip');
+        log('player.load() resolved');
       } catch (err) {
-        log(`Player constructor бросил: ${err.message}`, 'error');
+        log(`player.load() rejected: code=${err.code} message="${err.message}"`, 'error');
       }
     });
 
-    document.getElementById('btn-load').addEventListener('click', async () => {
-      if (!player) {
-        log('Сначала жми "new DrPlayer.Player()".', 'error');
-        return;
-      }
+    $fileInput.addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      clearPayloads();
+      const p = ensurePlayer();
       try {
-        await player.load('fixtures/stage2.dr.zip');
-        log('player.load() resolved — НЕ ожидаемо в Stage 2!', 'error');
+        log(`player.load(<file ${file.name}, ${file.size} bytes>)…`);
+        await p.load(file);
+        log('player.load() resolved');
       } catch (err) {
-        log(`player.load() ожидаемо бросил: ${err.message}`);
+        log(`player.load() rejected: code=${err.code} message="${err.message}"`, 'error');
       }
     });
 
-    document.getElementById('btn-mount').addEventListener('click', () => {
-      if (!player) {
-        log('Сначала жми "new DrPlayer.Player()".', 'error');
-        return;
+    $btnReload.addEventListener('click', () => {
+      if (player) {
+        try { player.destroy(); } catch (_) {}
       }
-      try {
-        player.mount(document.body);
-        log('player.mount() — НЕ ожидаемо в Stage 2!', 'error');
-      } catch (err) {
-        log(`player.mount() ожидаемо бросил: ${err.message}`);
-      }
+      player = null;
+      clearPayloads();
+      log('Player сброшен');
     });
   </script>
 </body>

@@ -5,12 +5,14 @@ on:
     branches: [main, dev]
   pull_request:
 
-# Stage 2 эпика dr-player-v1 (2026-05-22) — только validate-job.
-# Полноценный build-job (с cross-repo checkout Yanflint/deepreview + sync +
-# bundle build) НЕ работает на default GITHUB_TOKEN — deepreview приватный.
-# Решение для Stage 3+: либо открыть deepreview public, либо PAT в secrets.
-# Текущий compromise: build верифицируется локально (`npm run build`), CI
-# подтверждает только что lock-файл присутствует и npm install отрабатывает.
+# Stage 3 эпика dr-player-v1 (2026-05-22) — validate-job + test-job.
+# Полноценный bundle-build пока вне CI (требует cross-repo checkout
+# Yanflint/deepreview, который приватный; default GITHUB_TOKEN не имеет
+# доступа). Решение для Stage 5+ — либо открыть deepreview public, либо
+# PAT в secrets. Текущий compromise: bundle верифицируется локально
+# (`npm run build`), а CI подтверждает что lock-файл + npm install +
+# vitest test-suite зелёные (Player.load logic покрывается полностью,
+# без зависимости от deepreview repo).
 
 jobs:
   validate:
@@ -34,3 +36,16 @@ jobs:
       - name: Validate package.json structure
         run: |
           node -e "const p = require('./package.json'); if (!p.scripts.build || !p.scripts['dr-runtime-sync']) { console.error('package.json scripts отсутствуют'); process.exit(1); } console.log('package.json scripts OK:', Object.keys(p.scripts).join(', '));"
+
+  test:
+    name: vitest unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm install (dr-player)
+        run: npm install
+      - name: Run vitest
+        run: npm test
