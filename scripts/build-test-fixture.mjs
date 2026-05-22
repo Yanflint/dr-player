@@ -1,24 +1,24 @@
 #!/usr/bin/env node
-// scripts/build-test-fixture.mjs — детерминистично собирает
-// tests/fixtures/stage3.dr.zip для manual.html и smoke-проверки.
+// scripts/build-test-fixture.mjs — детерминистично собирает test fixture'ы.
 //
-// Fixture минимальный, но валидный по контракту .dr.zip (formatVersion "1.0"):
-//   manifest.json — formatVersion + triggers + inputs + canvas + counts.
-//   cfg.json      — пустой snapshot (canvas + один PNG-слой через assetId).
-//   assets/<id>.png — 1×1 прозрачный PNG (минимальный бинарь).
+// Stage 3 fixture: `tests/fixtures/stage3.dr.zip` — минимальный (1 PNG слой)
+//   для проверки contract'а Player.load (manifest + cfg + 1 asset).
+// Stage 4 fixture: `tests/fixtures/stage4.dr.zip` — визуально богаче
+//   (solid + text + PNG слои, разные позиции / opacity / rotation) для
+//   ручной проверки mount() в browser.
 //
-// Запуск: `npm run build-fixture`.
+// Запуск: `npm run build-fixture`. Оба файла обновляются.
 
 import JSZipPkg from 'jszip';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { deflateSync } from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
 const OUTDIR = join(ROOT, 'tests', 'fixtures');
-const OUTFILE = join(OUTDIR, 'stage3.dr.zip');
 
 // 1×1 прозрачный PNG (67 байт). Base64 → bytes ниже.
 const TRANSPARENT_PNG_B64 =
@@ -29,9 +29,111 @@ function base64ToBytes(b64) {
   return new Uint8Array(bin.buffer, bin.byteOffset, bin.byteLength);
 }
 
-async function main() {
-  if (!existsSync(OUTDIR)) mkdirSync(OUTDIR, { recursive: true });
+// CRC-32 (IEEE 802.3, polynomial 0xEDB88320). Используется в PNG chunks.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
 
+/**
+ * @param {Uint8Array} bytes
+ * @returns {number}
+ */
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Сборка PNG chunk: 4 byte length + 4 byte type + data + 4 byte CRC
+ * (CRC включает type + data).
+ *
+ * @param {string} type 4-char ASCII (например "IHDR").
+ * @param {Uint8Array} data
+ * @returns {Uint8Array}
+ */
+function makeChunk(type, data) {
+  const len = data.length;
+  const buf = new Uint8Array(8 + len + 4);
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(0, len, false); // big-endian
+  buf[4] = type.charCodeAt(0);
+  buf[5] = type.charCodeAt(1);
+  buf[6] = type.charCodeAt(2);
+  buf[7] = type.charCodeAt(3);
+  buf.set(data, 8);
+  const crcInput = buf.slice(4, 8 + len);
+  dv.setUint32(8 + len, crc32(crcInput), false);
+  return buf;
+}
+
+/**
+ * Сборка PNG с одной заливкой (RGB, без alpha).
+ *
+ * @param {number} w
+ * @param {number} h
+ * @param {[number, number, number]} rgb — три байта 0..255.
+ * @returns {Uint8Array}
+ */
+function makeSolidPng(w, h, rgb) {
+  // PNG magic: 89 50 4E 47 0D 0A 1A 0A.
+  const magic = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  // IHDR — 13 bytes: width(4) + height(4) + bitDepth(1) + colorType(1)
+  // + compression(1) + filter(1) + interlace(1).
+  // colorType=2 → RGB без alpha; bitDepth=8.
+  const ihdr = new Uint8Array(13);
+  const ihdrDv = new DataView(ihdr.buffer);
+  ihdrDv.setUint32(0, w, false);
+  ihdrDv.setUint32(4, h, false);
+  ihdr[8]  = 8;  // bitDepth
+  ihdr[9]  = 2;  // colorType (RGB)
+  ihdr[10] = 0;  // compression
+  ihdr[11] = 0;  // filter
+  ihdr[12] = 0;  // interlace
+
+  // Raw scanlines: для каждой row — 1 byte filter (0=None) + w * 3 RGB bytes.
+  const rowBytes = 1 + w * 3;
+  const raw = new Uint8Array(rowBytes * h);
+  for (let y = 0; y < h; y += 1) {
+    const off = y * rowBytes;
+    raw[off] = 0; // filter type None
+    for (let x = 0; x < w; x += 1) {
+      const p = off + 1 + x * 3;
+      raw[p]     = rgb[0];
+      raw[p + 1] = rgb[1];
+      raw[p + 2] = rgb[2];
+    }
+  }
+  const idat = new Uint8Array(deflateSync(raw));
+
+  const iend = new Uint8Array(0);
+
+  const ihdrChunk = makeChunk('IHDR', ihdr);
+  const idatChunk = makeChunk('IDAT', idat);
+  const iendChunk = makeChunk('IEND', iend);
+
+  const total = magic.length + ihdrChunk.length + idatChunk.length + iendChunk.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  out.set(magic, off); off += magic.length;
+  out.set(ihdrChunk, off); off += ihdrChunk.length;
+  out.set(idatChunk, off); off += idatChunk.length;
+  out.set(iendChunk, off);
+  return out;
+}
+
+async function buildStage3() {
   const assetId = 'asset_test1';
   const assetPath = `assets/${assetId}.png`;
 
@@ -51,33 +153,13 @@ async function main() {
   const cfg = {
     canvas: { width: 200, height: 200 },
     layers: [
-      {
-        id: 'layer_1',
-        type: 'png',
-        name: 'TestLayer',
-        assetId,
-        x: 50,
-        y: 50,
-        w: 100,
-        h: 100,
-      },
+      { id: 'layer_1', type: 'png', name: 'TestLayer', assetId, x: 50, y: 50, w: 100, h: 100 },
     ],
     eventGraph: { nodes: [], edges: [], layout: [] },
     actions: [],
     meta: { title: '', desc: '' },
     _assets: [
-      [
-        assetId,
-        {
-          kind: 'png',
-          payload: {
-            dataURL: assetPath,
-            width: 1,
-            height: 1,
-            hash: 'sha256:test',
-          },
-        },
-      ],
+      [assetId, { kind: 'png', payload: { dataURL: assetPath, width: 1, height: 1, hash: 'sha256:test' } }],
     ],
   };
 
@@ -85,10 +167,81 @@ async function main() {
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
   zip.file('cfg.json', JSON.stringify(cfg, null, 2));
   zip.file(assetPath, base64ToBytes(TRANSPARENT_PNG_B64));
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
 
-  const buf = await zip.generateAsync({ type: 'nodebuffer' });
-  writeFileSync(OUTFILE, buf);
-  console.log(`[build-fixture] ✓ ${OUTFILE} — ${buf.length} bytes`);
+async function buildStage4() {
+  const pngId = 'asset_pink';
+  const pngPath = `assets/${pngId}.png`;
+
+  const manifest = {
+    formatVersion: '1.0',
+    name: 'Stage4 test fixture — visible smoke',
+    createdAt: '2026-05-22T00:00:00.000Z',
+    createdBy: 'dr-player test fixture builder',
+    canvas: { width: 320, height: 240 },
+    triggers: [],
+    inputs: [],
+    outEvents: [],
+    layerCount: 3,
+    assetCount: 1,
+  };
+
+  // Слои specifically для визуальной проверки mount():
+  //   1) Solid background — голубой fill всего canvas'а.
+  //   2) PNG 64×64 — pink-asset, центрируется.
+  //   3) Text — "DR Player Stage 4" по центру, белый шрифт.
+  // z-order через layer index: solid first → PNG поверх → text сверху всего.
+  const cfg = {
+    canvas: { width: 320, height: 240 },
+    layers: [
+      {
+        id: 'bg', type: 'solid', name: 'Background',
+        color: '#1e3a5f', mode: 'layer',
+        x: 0, y: 0, w: 320, h: 240,
+      },
+      {
+        id: 'pic', type: 'png', name: 'Picture',
+        assetId: pngId,
+        x: 128, y: 88, w: 64, h: 64,
+        rotation: 15,
+      },
+      {
+        id: 'caption', type: 'text', name: 'Caption',
+        text: 'DR Player Stage 4',
+        color: '#ffffff', fontSize: 18, fontWeight: 600,
+        fontFamily: 'Inter, sans-serif', textAlign: 'center',
+        x: 60, y: 180, w: 200, h: 28,
+      },
+    ],
+    eventGraph: { nodes: [], edges: [], layout: [] },
+    actions: [],
+    meta: { title: 'Stage 4 smoke', desc: '' },
+    _assets: [
+      [pngId, { kind: 'png', payload: { dataURL: pngPath, width: 64, height: 64, hash: 'sha256:pink-test' } }],
+    ],
+  };
+
+  const zip = new JSZipPkg();
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  zip.file('cfg.json', JSON.stringify(cfg, null, 2));
+  // Pink 64×64 — реальный PNG через minimal encoder (RGB, без alpha).
+  zip.file(pngPath, makeSolidPng(64, 64, [0xff, 0x66, 0xaa]));
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
+async function main() {
+  if (!existsSync(OUTDIR)) mkdirSync(OUTDIR, { recursive: true });
+
+  const stage3 = await buildStage3();
+  const stage3Out = join(OUTDIR, 'stage3.dr.zip');
+  writeFileSync(stage3Out, stage3);
+  console.log(`[build-fixture] ✓ ${stage3Out} — ${stage3.length} bytes`);
+
+  const stage4 = await buildStage4();
+  const stage4Out = join(OUTDIR, 'stage4.dr.zip');
+  writeFileSync(stage4Out, stage4);
+  console.log(`[build-fixture] ✓ ${stage4Out} — ${stage4.length} bytes`);
 }
 
 main().catch((err) => {

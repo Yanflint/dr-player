@@ -1,6 +1,6 @@
 {
   "name": "@deepreview/player",
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0-alpha.3",
   "private": true,
   "type": "module",
   "description": "JS-плеер для интерактивных анимаций Deepreview (формат .dr.zip).",
