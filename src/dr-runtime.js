@@ -1,5 +1,5 @@
 // dr-runtime.js — bundled shared runtime для Deepreview.
-// Build: 2026-05-22T18:19:11.748Z | deepreview HEAD: 98b47084346c
+// Build: 2026-05-22T20:20:22.642Z | deepreview HEAD: 7c58e563bb23
 // DO NOT EDIT — генерируется через `npm run dr-runtime-build` в Yanflint/deepreview.
 // Source: https://github.com/Yanflint/deepreview/tree/dev/deepreview/js/dr-runtime/
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -1118,6 +1118,341 @@ var init_model = __esm({
   }
 });
 
+// js/event-graph/compileNodes.js
+function flatChildren(childrenBySocket) {
+  const out = [];
+  for (const k of Object.keys(childrenBySocket || {})) {
+    const arr = childrenBySocket[k];
+    if (Array.isArray(arr)) out.push(...arr);
+  }
+  return out;
+}
+function compileEvent(_spec, childrenBySocket) {
+  const children = flatChildren(childrenBySocket);
+  if (children.length === 0) return null;
+  return (ctx) => {
+    for (const c of children) c(ctx);
+  };
+}
+function compileStart(_spec, childrenBySocket) {
+  const fireKids = childrenBySocket.fire || [];
+  if (fireKids.length === 0) return null;
+  return (ctx) => {
+    for (const c of fireKids) {
+      try {
+        c(ctx);
+      } catch (_) {
+      }
+    }
+  };
+}
+function compileAnimation(spec, childrenBySocket, api) {
+  const playKids = childrenBySocket.play || [];
+  const doneKids = childrenBySocket.done || [];
+  if (playKids.length === 0 && doneKids.length === 0) return null;
+  if (playKids.length === 0) return null;
+  const mode = spec.mode === "loop" ? "loop" : "once";
+  const cycles = Number.isInteger(spec.cycles) && spec.cycles >= 1 ? spec.cycles : 1;
+  const addCycleListener2 = api && typeof api.addCycleListener === "function" ? api.addCycleListener : null;
+  const playByLayerId = api && api.playByLayerId;
+  return (ctx) => {
+    const next = { ...ctx, mode };
+    if (doneKids.length === 0 || !addCycleListener2) {
+      for (const c of playKids) c(next);
+      return;
+    }
+    const triggered = [];
+    const collectCtx = { ...next, collectLayer: (id) => {
+      if (id) triggered.push(id);
+    } };
+    for (const c of playKids) c(collectCtx);
+    if (triggered.length === 0) return;
+    const pending = triggered.map((lid) => new Promise((resolve) => {
+      let n = 0;
+      const unsub = addCycleListener2(lid, () => {
+        n += 1;
+        if (n >= cycles) {
+          unsub();
+          resolve();
+          return;
+        }
+        if (mode === "once" && playByLayerId) {
+          const playFn = playByLayerId.get(lid);
+          if (playFn) {
+            try {
+              playFn("once");
+            } catch (_) {
+            }
+          }
+        }
+      });
+    }));
+    Promise.all(pending).then(() => {
+      for (const c of doneKids) c(ctx);
+    }).catch(() => {
+    });
+  };
+}
+function compileAction(spec, childrenBySocket, api) {
+  const playAction = api && api.playAction;
+  if (!spec.actionId || typeof playAction !== "function") return null;
+  const doneKids = childrenBySocket.done || [];
+  return (ctx) => {
+    const mode = ctx.mode || spec.mode || "once";
+    playAction(spec.actionId, {
+      mode,
+      extrapolation: spec.extrapolation || "hold",
+      blending: spec.blending || "replace",
+      priority: Number.isFinite(spec.priority) ? spec.priority : 0,
+      reversed: spec.reversed === "rev",
+      blendIn: Number.isFinite(spec.blendIn) ? spec.blendIn : 0,
+      blendOut: Number.isFinite(spec.blendOut) ? spec.blendOut : 0,
+      onDone: () => {
+        for (const c of doneKids) {
+          try {
+            c(ctx);
+          } catch (_) {
+          }
+        }
+      }
+    });
+  };
+}
+function compileLayer(spec, childrenBySocket, api) {
+  const children = flatChildren(childrenBySocket);
+  const playByLayerId = api && api.playByLayerId;
+  const play = spec.layerId && playByLayerId ? playByLayerId.get(spec.layerId) : null;
+  if (!play && children.length === 0) return null;
+  return (ctx) => {
+    if (play) {
+      try {
+        play(ctx.mode || "once");
+      } catch (_) {
+      }
+      if (spec.layerId && typeof ctx.collectLayer === "function") {
+        ctx.collectLayer(spec.layerId);
+      }
+    }
+    for (const c of children) c(ctx);
+  };
+}
+function compileInteractiveAnimation(spec, _children, api) {
+  const layerId = spec.layerId;
+  if (!layerId) return null;
+  const routeIaTrigger = api && typeof api.routeIaTrigger === "function" ? api.routeIaTrigger : null;
+  if (!routeIaTrigger) return null;
+  return (ctx) => {
+    const name = ctx && ctx._targetSocket;
+    if (typeof name !== "string" || !name) return;
+    try {
+      routeIaTrigger(layerId, name);
+    } catch (_) {
+    }
+  };
+}
+function compileDelay(spec, childrenBySocket) {
+  const children = flatChildren(childrenBySocket);
+  if (children.length === 0) return null;
+  const ms = Math.max(0, Number.isFinite(spec.ms) ? Math.floor(spec.ms) : 500);
+  return (ctx) => {
+    setTimeout(() => {
+      for (const c of children) c(ctx);
+    }, ms);
+  };
+}
+var NODE_COMPILERS;
+var init_compileNodes = __esm({
+  "js/event-graph/compileNodes.js"() {
+    init_model();
+    NODE_COMPILERS = {
+      [NODE_EVENT]: compileEvent,
+      [NODE_START]: compileStart,
+      [NODE_ANIMATION]: compileAnimation,
+      [NODE_ACTION]: compileAction,
+      [NODE_LAYER]: compileLayer,
+      [NODE_INTERACTIVE_ANIMATION]: compileInteractiveAnimation,
+      [NODE_DELAY]: compileDelay
+    };
+  }
+});
+
+// js/event-graph/compileGraph.js
+function indexEdges(edges) {
+  const edgesFrom = /* @__PURE__ */ new Map();
+  for (const [, e] of edges) {
+    if (!e || !e.from || !e.to) continue;
+    let list = edgesFrom.get(e.from.nodeId);
+    if (!list) {
+      list = [];
+      edgesFrom.set(e.from.nodeId, list);
+    }
+    list.push(e);
+  }
+  return edgesFrom;
+}
+function compileNode(nodeId, nodes, edgesFrom, memo, api) {
+  if (memo.has(nodeId)) {
+    const v = memo.get(nodeId);
+    if (v === "__inprogress__") return null;
+    return (
+      /** @type {CompiledFn} */
+      v ?? null
+    );
+  }
+  memo.set(nodeId, "__inprogress__");
+  const spec = nodes.get(nodeId);
+  if (!spec) {
+    memo.set(nodeId, null);
+    return null;
+  }
+  const compile = NODE_COMPILERS[spec.kind];
+  if (typeof compile !== "function") {
+    memo.set(nodeId, null);
+    return null;
+  }
+  const outgoing = edgesFrom.get(nodeId) || [];
+  const childrenBySocket = {};
+  for (const e of outgoing) {
+    const childFn = compileNode(e.to.nodeId, nodes, edgesFrom, memo, api);
+    if (typeof childFn !== "function") continue;
+    const sock = e.from.socket || "";
+    const targetSocket = e.to.socket || "";
+    const wrapped = targetSocket ? (ctx) => childFn({ ...ctx || {}, _targetSocket: targetSocket }) : childFn;
+    if (!childrenBySocket[sock]) childrenBySocket[sock] = [];
+    childrenBySocket[sock].push(wrapped);
+  }
+  const fn = compile(spec, childrenBySocket, api) || null;
+  memo.set(nodeId, fn);
+  return fn;
+}
+function compileEventGraph(graph, api = {}) {
+  const nodes = graph?.nodes;
+  const edges = graph?.edges;
+  if (!nodes || !edges) return [];
+  const edgesFrom = indexEdges(edges);
+  const memo = /* @__PURE__ */ new Map();
+  const transitions = [];
+  for (const [evId, evSpec] of nodes) {
+    if (!evSpec || evSpec.kind !== NODE_EVENT) continue;
+    const sourceType = evSpec.sourceType || "layer";
+    if (sourceType !== "layer") continue;
+    if (!evSpec.layerId) continue;
+    const fn = compileNode(evId, nodes, edgesFrom, memo, api);
+    if (!fn) continue;
+    transitions.push({
+      fromLayerId: evSpec.layerId,
+      play: () => {
+        try {
+          fn({});
+        } catch (_) {
+        }
+      }
+    });
+  }
+  return transitions;
+}
+function compileTriggers(graph, api = {}) {
+  const nodes = graph?.nodes;
+  const edges = graph?.edges;
+  if (!nodes || !edges) return [];
+  const edgesFrom = indexEdges(edges);
+  const memo = /* @__PURE__ */ new Map();
+  const handlers = [];
+  for (const [evId, evSpec] of nodes) {
+    if (!evSpec || evSpec.kind !== NODE_EVENT) continue;
+    if (evSpec.sourceType !== "trigger") continue;
+    const name = evSpec.triggerName;
+    if (typeof name !== "string" || !name) continue;
+    const fn = compileNode(evId, nodes, edgesFrom, memo, api);
+    if (!fn) continue;
+    handlers.push({
+      name,
+      fn: () => {
+        try {
+          fn({});
+        } catch (_) {
+        }
+      }
+    });
+  }
+  return handlers;
+}
+function compileStarts(graph, api = {}) {
+  const nodes = graph?.nodes;
+  const edges = graph?.edges;
+  if (!nodes || !edges) return [];
+  const edgesFrom = indexEdges(edges);
+  const memo = /* @__PURE__ */ new Map();
+  const starts = [];
+  for (const [nid, spec] of nodes) {
+    if (!spec || spec.kind !== NODE_START) continue;
+    const fn = compileNode(nid, nodes, edgesFrom, memo, api);
+    if (!fn) continue;
+    starts.push(() => {
+      try {
+        fn({});
+      } catch (_) {
+      }
+    });
+  }
+  return starts;
+}
+var init_compileGraph = __esm({
+  "js/event-graph/compileGraph.js"() {
+    init_compileNodes();
+    init_model();
+  }
+});
+
+// js/event-graph/playController.js
+var init_playController = __esm({
+  "js/event-graph/playController.js"() {
+  }
+});
+
+// js/event-graph/hintPulse.js
+var init_hintPulse = __esm({
+  "js/event-graph/hintPulse.js"() {
+  }
+});
+
+// js/event-graph/layerCycleBus.js
+function addCycleListener(layerId, fn) {
+  if (!layerId || typeof fn !== "function") return () => {
+  };
+  let set = listeners.get(layerId);
+  if (!set) {
+    set = /* @__PURE__ */ new Set();
+    listeners.set(layerId, set);
+  }
+  set.add(fn);
+  return () => {
+    const s = listeners.get(layerId);
+    if (!s) return;
+    s.delete(fn);
+    if (s.size === 0) listeners.delete(layerId);
+  };
+}
+function fireCycle(layerId) {
+  const set = listeners.get(layerId);
+  if (!set) return;
+  for (const fn of Array.from(set)) {
+    try {
+      fn();
+    } catch (_) {
+    }
+  }
+}
+function clearCycleListeners() {
+  listeners.clear();
+}
+var listeners;
+var init_layerCycleBus = __esm({
+  "js/event-graph/layerCycleBus.js"() {
+    listeners = /* @__PURE__ */ new Map();
+  }
+});
+
 // js/core/eventBatch.js
 var init_eventBatch = __esm({
   "js/core/eventBatch.js"() {
@@ -1511,12 +1846,6 @@ var init_inputCommit = __esm({
   }
 });
 
-// js/event-graph/playController.js
-var init_playController = __esm({
-  "js/event-graph/playController.js"() {
-  }
-});
-
 // js/event-graph/dock/nodes.js
 function _readIaTriggers(L) {
   if (!L || L.type !== "interactive-animation") return [];
@@ -1527,14 +1856,6 @@ function _readIaTriggers(L) {
   );
   if (payload && Array.isArray(payload.triggers)) return payload.triggers.slice();
   return [];
-}
-function flatChildren(childrenBySocket) {
-  const out = [];
-  for (const k of Object.keys(childrenBySocket || {})) {
-    const arr = childrenBySocket[k];
-    if (Array.isArray(arr)) out.push(...arr);
-  }
-  return out;
 }
 function viewModelWithLayer(id, spec, { layerById }, { typeLabel }) {
   const L = spec.layerId ? layerById.get(spec.layerId) : null;
@@ -1554,6 +1875,7 @@ var init_nodes = __esm({
     init_core();
     init_inputCommit();
     init_playController();
+    init_compileNodes();
     NODE_ICONS = {
       [NODE_EVENT]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2l6 7h-4l2 5L4 7h4z"/></svg>',
       [NODE_ANIMATION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 8h10M11 5l3 3-3 3"/></svg>',
@@ -1642,17 +1964,10 @@ var init_nodes = __esm({
           }
           return "\u041A\u043B\u0438\u043A \u043F\u043E \u044D\u0442\u043E\u043C\u0443 \u0441\u043B\u043E\u044E \u0432 Preview \u2192 \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0446\u0435\u043F\u043E\u0447\u043A\u0430.";
         },
-        // Event — корень: прокидывает ctx живым детям. Без детей → null (мёртвая ветка).
-        // Логика регистрации (как layer-transition или как trigger-handler) живёт
-        // снаружи — compileEventGraph фильтрует по sourceType='layer',
-        // compileTriggers — по sourceType='trigger'. Сам compile pure.
-        compile: (_spec, childrenBySocket) => {
-          const children = flatChildren(childrenBySocket);
-          if (children.length === 0) return null;
-          return (ctx) => {
-            for (const c of children) c(ctx);
-          };
-        }
+        // Event — корень subgraph'а. Pure compile живёт в `event-graph/compileNodes.js`
+        // (Stage 5). compileEventGraph / compileTriggers фильтруют по sourceType
+        // на верхнем уровне; сам compile — pure, через NODE_COMPILERS.
+        compile: NODE_COMPILERS[NODE_EVENT]
       },
       [NODE_START]: {
         typeLabel: "\u0421\u0442\u0430\u0440\u0442",
@@ -1675,18 +1990,8 @@ var init_nodes = __esm({
         },
         propsFields: [],
         propsHint: "\u041F\u0440\u0438 \u0432\u0445\u043E\u0434\u0435 \u0432 Preview \u044D\u0442\u0430 \u043D\u043E\u0434\u0430 \u0444\u0430\u0439\u0440\u0438\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u2014 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u043E \u0414\u041E \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u043A\u0430\u0434\u0440\u0430. \u0423\u0434\u043E\u0431\u043D\u043E \u0447\u0442\u043E\u0431\u044B \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u0430\u0442\u044C \u0441 \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u043E\u0433\u043E Action \u0438 \u043D\u0435 \xAB\u043C\u0435\u043B\u044C\u043A\u0430\u0442\u044C\xBB idle-\u0441\u0446\u0435\u043D\u043E\u0439.",
-        compile: (_spec, childrenBySocket) => {
-          const fireKids = childrenBySocket.fire || [];
-          if (fireKids.length === 0) return null;
-          return (ctx) => {
-            for (const c of fireKids) {
-              try {
-                c(ctx);
-              } catch (_) {
-              }
-            }
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`.
+        compile: NODE_COMPILERS[NODE_START]
       },
       [NODE_ANIMATION]: {
         typeLabel: "\u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F",
@@ -1739,61 +2044,11 @@ var init_nodes = __esm({
           { type: "number", key: "cycles", label: "\u0426\u0438\u043A\u043B\u043E\u0432", min: 1, step: 1 }
         ],
         propsHint: "\u0426\u0438\u043A\u043B\u043E\u0432 \u2014 \u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0440\u0430\u0437 \u043F\u0440\u043E\u0438\u0433\u0440\u0430\u0442\u044C \u043F\u0435\u0440\u0435\u0434 \u0441\u043E\u0431\u044B\u0442\u0438\u0435\u043C \xAB\u041A\u043E\u043D\u0435\u0446\xBB. \u0414\u043B\u044F loop \u0430\u043D\u0438\u043C\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0430\u0435\u0442 \u043A\u0440\u0443\u0442\u0438\u0442\u044C\u0441\u044F, \xAB\u041A\u043E\u043D\u0435\u0446\xBB \u0441\u0442\u0440\u0435\u043B\u044F\u0435\u0442 \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u043F\u043E\u0441\u043B\u0435 N \u0446\u0438\u043A\u043B\u043E\u0432.",
-        // Animation:
-        //   • Без подключений к 'done' (fire-and-forget) — прокидывает ctx в play-ветку.
-        //   • С подключённым 'done' — собирает layerId'ы из play-ветки через
-        //     ctx.collectLayer, подписывается на layerCycleBus на cycles циклов
-        //     по каждому слою (Promise.all), затем дёргает done-ветку.
-        compile: (spec, childrenBySocket, api) => {
-          const playKids = childrenBySocket.play || [];
-          const doneKids = childrenBySocket.done || [];
-          if (playKids.length === 0 && doneKids.length === 0) return null;
-          if (playKids.length === 0) return null;
-          const mode = spec.mode === "loop" ? "loop" : "once";
-          const cycles = Number.isInteger(spec.cycles) && spec.cycles >= 1 ? spec.cycles : 1;
-          const addCycleListener2 = api && typeof api.addCycleListener === "function" ? api.addCycleListener : null;
-          const playByLayerId = api && api.playByLayerId;
-          return (ctx) => {
-            const next = { ...ctx, mode };
-            if (doneKids.length === 0 || !addCycleListener2) {
-              for (const c of playKids) c(next);
-              return;
-            }
-            const triggered = [];
-            const collectCtx = { ...next, collectLayer: (id) => {
-              if (id) triggered.push(id);
-            } };
-            for (const c of playKids) c(collectCtx);
-            if (triggered.length === 0) return;
-            const pending = triggered.map((lid) => (
-              /** @type {Promise<void>} */
-              new Promise((resolve) => {
-                let n = 0;
-                const unsub = addCycleListener2(lid, () => {
-                  n += 1;
-                  if (n >= cycles) {
-                    unsub();
-                    resolve();
-                    return;
-                  }
-                  if (mode === "once" && playByLayerId) {
-                    const playFn = playByLayerId.get(lid);
-                    if (playFn) {
-                      try {
-                        playFn("once");
-                      } catch (_) {
-                      }
-                    }
-                  }
-                });
-              })
-            ));
-            Promise.all(pending).then(() => {
-              for (const c of doneKids) c(ctx);
-            }).catch(() => {
-            });
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`.
+        // Animation: play без 'done' — fire-and-forget ctx в play-ветку. С 'done' —
+        // сбор layerId'ов через ctx.collectLayer, подписка на layerCycleBus на
+        // cycles циклов, done-ветка после Promise.all.
+        compile: NODE_COMPILERS[NODE_ANIMATION]
       },
       [NODE_ACTION]: {
         typeLabel: "Action",
@@ -1900,31 +2155,9 @@ var init_nodes = __esm({
           { name: "\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E", keys: ["extrapolation", "reversed", "blendIn", "blendOut"], collapsed: true }
         ],
         propsHint: "\u041F\u0440\u043E\u0438\u0433\u0440\u044B\u0432\u0430\u043D\u0438\u0435 \u2014 \u0438\u0433\u0440\u0430\u0442\u044C \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u0438\u043B\u0438 \u0437\u0430\u0446\u0438\u043A\u043B\u0438\u0442\u044C. \u0412\u043D\u0435 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D\u0430: \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043A\u0440\u0430\u0439\u043D\u0438\u0439 \u043A\u0430\u0434\u0440 \u0438\u043B\u0438 \u0441\u0431\u0440\u0430\u0441\u044B\u0432\u0430\u0442\u044C \u0432 idle. \u0421\u043C\u0435\u0448\u0438\u0432\u0430\u043D\u0438\u0435: \u0437\u0430\u043C\u0435\u043D\u044F\u0442\u044C idle \u0438\u043B\u0438 \u043F\u0440\u0438\u0431\u0430\u0432\u043B\u044F\u0442\u044C. \u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: \u043F\u0440\u0438 \u043D\u0430\u0441\u043B\u043E\u0435\u043D\u0438\u0438 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0432\u044B\u0448\u0435. \u041D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435: \u043E\u0431\u0440\u0430\u0442\u043D\u043E\u0435 \u0438\u0433\u0440\u0430\u0435\u0442 \u0441 \u043A\u043E\u043D\u0446\u0430. \u041F\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434/\u0432\u044B\u0445\u043E\u0434: crossfade \u0441 idle \u043D\u0430 \u0433\u0440\u0430\u043D\u0438\u0446\u0430\u0445.",
-        compile: (spec, childrenBySocket, api) => {
-          const playAction = api && api.playAction;
-          if (!spec.actionId || typeof playAction !== "function") return null;
-          const doneKids = childrenBySocket.done || [];
-          return (ctx) => {
-            const mode = ctx.mode || spec.mode || "once";
-            playAction(spec.actionId, {
-              mode,
-              extrapolation: spec.extrapolation || "hold",
-              blending: spec.blending || "replace",
-              priority: Number.isFinite(spec.priority) ? spec.priority : 0,
-              reversed: spec.reversed === "rev",
-              blendIn: Number.isFinite(spec.blendIn) ? spec.blendIn : 0,
-              blendOut: Number.isFinite(spec.blendOut) ? spec.blendOut : 0,
-              onDone: () => {
-                for (const c of doneKids) {
-                  try {
-                    c(ctx);
-                  } catch (_) {
-                  }
-                }
-              }
-            });
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`. Запускает Action по id
+        // через api.playAction; default mode 'once' для event-цепочек.
+        compile: NODE_COMPILERS[NODE_ACTION]
       },
       [NODE_LAYER]: {
         typeLabel: "\u0421\u043B\u043E\u0439",
@@ -1951,29 +2184,10 @@ var init_nodes = __esm({
         propsHint(n) {
           return n.layerId ? null : "\u0412\u044B\u0431\u0435\u0440\u0438 Lottie \u0438\u043B\u0438 PNG \u0441\u043E \u0441\u043F\u0440\u0430\u0439\u0442\u043E\u043C.";
         },
-        // Layer — терминал: вызывает playByLayerId(ctx.mode). Если layerId не задан
-        // или для него нет play-функции — ветка мёртвая → null.
-        // Если родительская Animation слушает сокет 'done', она кладёт в ctx
-        // collectLayer — Layer регистрирует в нём свой layerId для последующей
-        // подписки на layerCycleBus.
-        compile: (spec, childrenBySocket, api) => {
-          const children = flatChildren(childrenBySocket);
-          const playByLayerId = api?.playByLayerId;
-          const play = spec.layerId && playByLayerId ? playByLayerId.get(spec.layerId) : null;
-          if (!play && children.length === 0) return null;
-          return (ctx) => {
-            if (play) {
-              try {
-                play(ctx.mode || "once");
-              } catch (_) {
-              }
-              if (spec.layerId && typeof ctx.collectLayer === "function") {
-                ctx.collectLayer(spec.layerId);
-              }
-            }
-            for (const c of children) c(ctx);
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`. Терминал: вызывает
+        // playByLayerId(ctx.mode); если Animation 'done' собирает layerId'ы — Layer
+        // регистрируется через ctx.collectLayer.
+        compile: NODE_COMPILERS[NODE_LAYER]
       },
       // IA-NODE-IN-PARENT-GRAPH (2026-05-13). Нода-приёмник триггеров interactive-
       // animation слоя. Динамические input-сокеты по `L.triggers` выбранного слоя
@@ -2055,33 +2269,10 @@ var init_nodes = __esm({
           if (!n.layerId) return "\u0412\u044B\u0431\u0435\u0440\u0438 IA-\u0441\u043B\u043E\u0439 \u2014 \u043D\u0430 \u043D\u043E\u0434\u0435 \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u0441\u043E\u043A\u0435\u0442\u044B \u043F\u043E \u0435\u0433\u043E \u0442\u0440\u0438\u0433\u0433\u0435\u0440\u0430\u043C.";
           return "\u0422\u0440\u0438\u0433\u0433\u0435\u0440\u044B \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u0433\u043E \u0441\u043B\u043E\u044F \u2014 \u044D\u0442\u043E \u0432\u0445\u043E\u0434\u044B \u043D\u043E\u0434\u044B. \u0421\u043E\u0435\u0434\u0438\u043D\u0438 Event-\u043D\u043E\u0434\u0430 / Action / \u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F \u0441 \u0441\u043E\u043A\u0435\u0442\u043E\u043C \u2192 \u0432 Play-mode \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 trigger \u0432\u043D\u0443\u0442\u0440\u0438 IA.";
         },
-        /**
-         * IA-нода — terminal: outgoing edges нет, childrenBySocket пустой. Имя
-         * активированного input-сокета приходит через `ctx._targetSocket`
-         * (compileGraph wrap'ит childFn в compileNode чтобы передать `e.to.socket`).
-         *
-         * @param {import('../../core/index.js').EventGraphNode} spec
-         * @param {Record<string, Array<(ctx: any) => void>>} _children
-         * @param {{ routeIaTrigger?: (layerId: string, name: string) => boolean }} api
-         */
-        compile: (spec, _children, api) => {
-          const layerId = (
-            /** @type {any} */
-            spec.layerId
-          );
-          if (!layerId) return null;
-          const routeIaTrigger = api && typeof api.routeIaTrigger === "function" ? api.routeIaTrigger : null;
-          if (!routeIaTrigger) return null;
-          return (ctx) => {
-            const name = ctx && /** @type {any} */
-            ctx._targetSocket;
-            if (typeof name !== "string" || !name) return;
-            try {
-              routeIaTrigger(layerId, name);
-            } catch (_) {
-            }
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`. IA-нода — terminal:
+        // routeIaTrigger(spec.layerId, ctx._targetSocket) — имя сокета = имя
+        // триггера IA-слоя.
+        compile: NODE_COMPILERS[NODE_INTERACTIVE_ANIMATION]
       },
       [NODE_DELAY]: {
         typeLabel: "\u0417\u0430\u0434\u0435\u0440\u0436\u043A\u0430",
@@ -2108,17 +2299,9 @@ var init_nodes = __esm({
           { type: "number", key: "ms", label: "\u041C\u0438\u043B\u043B\u0438\u0441\u0435\u043A\u0443\u043D\u0434\u044B", min: 0, step: 50 }
         ],
         propsHint: "\u0427\u0435\u0440\u0435\u0437 \u0443\u043A\u0430\u0437\u0430\u043D\u043D\u043E\u0435 \u0432\u0440\u0435\u043C\u044F \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0432\u0441\u0435 \u0438\u0441\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u0432\u0435\u0442\u043A\u0438.",
-        // Delay — оборачивает продолжение в setTimeout. Без детей → null.
-        compile: (spec, childrenBySocket) => {
-          const children = flatChildren(childrenBySocket);
-          if (children.length === 0) return null;
-          const ms = Math.max(0, Number.isFinite(spec.ms) ? Math.floor(spec.ms) : 500);
-          return (ctx) => {
-            setTimeout(() => {
-              for (const c of children) c(ctx);
-            }, ms);
-          };
-        }
+        // Pure compile — `event-graph/compileNodes.js`. setTimeout(ctx.ms) обёртка
+        // вокруг детей.
+        compile: NODE_COMPILERS[NODE_DELAY]
       }
     };
     KIND_DOT_COLOR = {
@@ -2138,57 +2321,6 @@ var init_nodes = __esm({
       /** @type {unknown} */
       NODE_TYPES
     );
-  }
-});
-
-// js/event-graph/compileGraph.js
-var init_compileGraph = __esm({
-  "js/event-graph/compileGraph.js"() {
-    init_nodes();
-    init_model();
-  }
-});
-
-// js/event-graph/hintPulse.js
-var init_hintPulse = __esm({
-  "js/event-graph/hintPulse.js"() {
-  }
-});
-
-// js/event-graph/layerCycleBus.js
-function addCycleListener(layerId, fn) {
-  if (!layerId || typeof fn !== "function") return () => {
-  };
-  let set = listeners.get(layerId);
-  if (!set) {
-    set = /* @__PURE__ */ new Set();
-    listeners.set(layerId, set);
-  }
-  set.add(fn);
-  return () => {
-    const s = listeners.get(layerId);
-    if (!s) return;
-    s.delete(fn);
-    if (s.size === 0) listeners.delete(layerId);
-  };
-}
-function fireCycle(layerId) {
-  const set = listeners.get(layerId);
-  if (!set) return;
-  for (const fn of Array.from(set)) {
-    try {
-      fn();
-    } catch (_) {
-    }
-  }
-}
-function clearCycleListeners() {
-  listeners.clear();
-}
-var listeners;
-var init_layerCycleBus = __esm({
-  "js/event-graph/layerCycleBus.js"() {
-    listeners = /* @__PURE__ */ new Map();
   }
 });
 
@@ -2332,6 +2464,7 @@ var init_index = __esm({
     init_anim_runtime();
     init_event_graph();
     init_event_graph();
+    init_event_graph();
     init_core();
     init_deserializeIaSnapshot();
     init_assetLibraryReadOnly();
@@ -2346,6 +2479,9 @@ export {
   cascadeChildResize,
   cascadeTextScale,
   clearCycleListeners,
+  compileEventGraph,
+  compileStarts,
+  compileTriggers,
   createInterpolator,
   createRuntime,
   decomposeMatrixFull,

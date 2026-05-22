@@ -230,6 +230,117 @@ async function buildStage4() {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
+async function buildStage5() {
+  const pngId = 'asset_pink';
+  const pngPath = `assets/${pngId}.png`;
+
+  const manifest = {
+    formatVersion: '1.0',
+    name: 'Stage5 test fixture — анимация по триггеру',
+    createdAt: '2026-05-22T00:00:00.000Z',
+    createdBy: 'dr-player test fixture builder',
+    canvas: { width: 320, height: 240 },
+    triggers: ['jump', 'spin'],
+    inputs: [],
+    outEvents: [],
+    layerCount: 2,
+    assetCount: 1,
+  };
+
+  // Action 'jump_action' — двигает pic.y с 88 (idle) до 30 (вверх) и обратно
+  // за 0.5 секунды. Channel `y` — стандартный transform канал в anim-runtime.
+  // Action 'spin_action' — поворот pic.rotation 0 → 360 за 1 секунду (loop).
+  const jumpActionId = 'jump_action';
+  const spinActionId = 'spin_action';
+
+  // EventGraph:
+  //   ev_jump (Event sourceType='trigger' name='jump') → a_jump (Action jump_action)
+  //   ev_spin (Event sourceType='trigger' name='spin') → a_spin (Action spin_action)
+  const evJumpId = 'ev_jump';
+  const evSpinId = 'ev_spin';
+  const aJumpId = 'a_jump';
+  const aSpinId = 'a_spin';
+
+  const cfg = {
+    canvas: { width: 320, height: 240 },
+    layers: [
+      {
+        id: 'bg', type: 'solid', name: 'Background',
+        color: '#1e3a5f', mode: 'layer',
+        x: 0, y: 0, w: 320, h: 240,
+      },
+      {
+        id: 'pic', type: 'png', name: 'Picture',
+        assetId: pngId,
+        x: 128, y: 88, w: 64, h: 64,
+        rotation: 0, opacity: 1,
+      },
+    ],
+    eventGraph: {
+      nodes: [
+        [evJumpId, { id: evJumpId, kind: 'event', sourceType: 'trigger', triggerName: 'jump' }],
+        [aJumpId,  { id: aJumpId,  kind: 'action', actionId: jumpActionId, mode: 'once', extrapolation: 'hold', blending: 'replace', priority: 0 }],
+        [evSpinId, { id: evSpinId, kind: 'event', sourceType: 'trigger', triggerName: 'spin' }],
+        [aSpinId,  { id: aSpinId,  kind: 'action', actionId: spinActionId, mode: 'loop', extrapolation: 'hold', blending: 'replace', priority: 0 }],
+      ],
+      edges: [
+        ['e1', { id: 'e1', from: { nodeId: evJumpId, socket: 'onClick' }, to: { nodeId: aJumpId, socket: 'trigger' } }],
+        ['e2', { id: 'e2', from: { nodeId: evSpinId, socket: 'onClick' }, to: { nodeId: aSpinId, socket: 'trigger' } }],
+      ],
+      layout: [],
+    },
+    actions: [
+      [jumpActionId, {
+        id: jumpActionId,
+        name: 'Jump',
+        playMode: 'once',
+        range: [0, 0.5],
+        duration: 0.5,
+        tracks: [
+          {
+            id: 'trk_jump_y',
+            layerId: 'pic',
+            channel: 'y',
+            keyframes: [
+              { time: 0,    value: 88, interpolation: 'linear' },
+              { time: 0.25, value: 30, interpolation: 'linear' },
+              { time: 0.5,  value: 88, interpolation: 'linear' },
+            ],
+          },
+        ],
+      }],
+      [spinActionId, {
+        id: spinActionId,
+        name: 'Spin',
+        playMode: 'loop',
+        range: [0, 1],
+        duration: 1,
+        tracks: [
+          {
+            id: 'trk_spin_rot',
+            layerId: 'pic',
+            channel: 'rotation',
+            keyframes: [
+              { time: 0, value: 0,   interpolation: 'linear' },
+              { time: 1, value: 360, interpolation: 'linear' },
+            ],
+          },
+        ],
+      }],
+    ],
+    meta: { title: 'Stage 5 runtime smoke', desc: 'jump / spin triggers' },
+    _assets: [
+      [pngId, { kind: 'png', payload: { dataURL: pngPath, width: 64, height: 64, hash: 'sha256:pink-test' } }],
+    ],
+  };
+
+  const zip = new JSZipPkg();
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  zip.file('cfg.json', JSON.stringify(cfg, null, 2));
+  zip.file(pngPath, makeSolidPng(64, 64, [0xff, 0x66, 0xaa]));
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
 async function main() {
   if (!existsSync(OUTDIR)) mkdirSync(OUTDIR, { recursive: true });
 
@@ -242,6 +353,11 @@ async function main() {
   const stage4Out = join(OUTDIR, 'stage4.dr.zip');
   writeFileSync(stage4Out, stage4);
   console.log(`[build-fixture] ✓ ${stage4Out} — ${stage4.length} bytes`);
+
+  const stage5 = await buildStage5();
+  const stage5Out = join(OUTDIR, 'stage5.dr.zip');
+  writeFileSync(stage5Out, stage5);
+  console.log(`[build-fixture] ✓ ${stage5Out} — ${stage5.length} bytes`);
 }
 
 main().catch((err) => {

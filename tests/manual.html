@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>dr-player — Stage 4 manual test</title>
+  <title>dr-player — Stage 5 manual test</title>
   <style>
     html, body { background: #fff; }
     body {
@@ -41,7 +41,7 @@
       margin-bottom: 8px;
       font-size: 14px;
     }
-    button:hover { background: #f0f0f0; }
+    button:hover:not(:disabled) { background: #f0f0f0; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .file-label {
@@ -77,27 +77,68 @@
     }
     .panel { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
     .panel-side { flex: 1; min-width: 360px; }
+    .scroll-spacer {
+      height: 90vh;
+      background: linear-gradient(180deg, #fafafa 0%, #e0e0e0 100%);
+      border-radius: 6px;
+      padding: 24px;
+      margin: 12px 0;
+      box-sizing: border-box;
+      color: #666;
+      font-size: 13px;
+    }
+    .fps-counter {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+      z-index: 9999;
+      min-width: 140px;
+    }
+    .fps-counter span { color: #4ade80; }
+    .trigger-row { background: #fff8e0; border: 1px solid #f0c850; border-radius: 6px; padding: 12px; margin-top: 12px; }
+    .trigger-row strong { display: block; margin-bottom: 6px; color: #7a5500; }
   </style>
 </head>
 <body>
-  <h1>dr-player — Stage 4 manual test</h1>
-  <p>Проверка <code>Player.load(.dr.zip)</code> + <code>Player.mount(el)</code>.
-  После <code>loaded</code> плеер автоматически вызывает <code>mount</code> в
-  область ниже. Stage 4 — static первый кадр (без анимаций); Stage 5 эпика
-  добавит rAF + IntersectionObserver auto-pause.</p>
+  <div id="fps-counter" class="fps-counter">FPS: <span id="fps-value">—</span></div>
+
+  <h1>dr-player — Stage 5 manual test</h1>
+  <p>Проверка <code>player.trigger(name)</code> + rAF loop + IntersectionObserver
+  auto-pause. После <code>loaded</code> плеер автоматически <code>mount</code>'ится.
+  Кнопка «Загрузить stage5.dr.zip» подгружает fixture с двумя триггерами
+  (jump / spin) и Action'ами, которые двигают / поворачивают слой. Скролл
+  вверх/вниз — IntersectionObserver включит pause/resume.</p>
 
   <div id="status" class="status">Ожидание загрузки bundle…</div>
 
   <h3>Источник .dr.zip</h3>
   <div class="row">
-    <button id="btn-stage4">Загрузить stage4.dr.zip (visible smoke)</button>
+    <button id="btn-stage5">Загрузить stage5.dr.zip (Stage 5 runtime smoke)</button>
+    <button id="btn-stage4">Загрузить stage4.dr.zip (static)</button>
     <button id="btn-stage3">Загрузить stage3.dr.zip (1×1 PNG)</button>
     <label class="file-label">
       Выбрать .dr.zip с диска…
       <input type="file" id="file-input" accept=".dr.zip,.zip" />
     </label>
+  </div>
+  <div class="row">
     <button id="btn-reload">Сброс (new Player)</button>
     <button id="btn-unmount" disabled>Unmount</button>
+    <label style="display:inline-flex; gap:6px; align-items:center; font-size:13px;">
+      <input type="checkbox" id="chk-autopause" checked />
+      autoPause (IntersectionObserver pause за viewport'ом)
+    </label>
+  </div>
+
+  <div id="trigger-row" class="trigger-row" style="display:none;">
+    <strong>Триггеры (стартуют Action'ы):</strong>
+    <div id="trigger-buttons"></div>
   </div>
 
   <div class="panel">
@@ -118,6 +159,12 @@
         <pre>—</pre>
       </div>
 
+      <h3>Событие <code>trigger</code></h3>
+      <div id="payload-trigger" class="payload-box">
+        <h4>Ожидаем…</h4>
+        <pre>—</pre>
+      </div>
+
       <h3>Событие <code>error</code></h3>
       <div id="payload-error" class="payload-box">
         <h4>Ожидаем…</h4>
@@ -125,6 +172,15 @@
       </div>
     </div>
   </div>
+
+  <h3>IntersectionObserver scroll test</h3>
+  <p style="font-size: 13px; color: #666;">
+    Скролл вниз — плеер уйдёт за viewport, IntersectionObserver зафиксирует
+    not-intersecting и поставит pause (FPS upra пройти к 0).
+    Скролл обратно — resume (FPS вырастет).
+  </p>
+  <div class="scroll-spacer">↓ scroll вниз для теста IntersectionObserver ↓</div>
+  <div class="scroll-spacer">↓ еще ↓</div>
 
   <h3>Console output</h3>
   <pre id="console"></pre>
@@ -135,13 +191,19 @@
     const $console = document.getElementById('console');
     const $payloadLoaded = document.getElementById('payload-loaded');
     const $payloadMounted = document.getElementById('payload-mounted');
+    const $payloadTrigger = document.getElementById('payload-trigger');
     const $payloadError = document.getElementById('payload-error');
+    const $btnStage5 = document.getElementById('btn-stage5');
     const $btnStage4 = document.getElementById('btn-stage4');
     const $btnStage3 = document.getElementById('btn-stage3');
     const $btnReload = document.getElementById('btn-reload');
     const $btnUnmount = document.getElementById('btn-unmount');
+    const $chkAutoPause = document.getElementById('chk-autopause');
     const $fileInput = document.getElementById('file-input');
     const $mountTarget = document.getElementById('mount-target');
+    const $triggerRow = document.getElementById('trigger-row');
+    const $triggerButtons = document.getElementById('trigger-buttons');
+    const $fpsValue = document.getElementById('fps-value');
 
     function log(msg, kind) {
       const ts = new Date().toISOString().slice(11, 23);
@@ -158,18 +220,41 @@
 
     function renderPayload(box, kind, payload) {
       box.className = `payload-box ${kind}`;
-      const titles = { loaded: '✅ loaded', mounted: '🎬 mounted', error: '❌ error' };
+      const titles = { loaded: '✅ loaded', mounted: '🎬 mounted', error: '❌ error', trigger: '⚡ trigger' };
       box.querySelector('h4').textContent = titles[kind] || '—';
       box.querySelector('pre').textContent = JSON.stringify(payload, null, 2);
     }
 
     function clearPayloads() {
-      for (const [box, label] of [[$payloadLoaded, 'loaded'], [$payloadMounted, 'mounted'], [$payloadError, 'error']]) {
+      for (const box of [$payloadLoaded, $payloadMounted, $payloadTrigger, $payloadError]) {
         box.className = 'payload-box';
         box.querySelector('h4').textContent = 'Ожидаем…';
         box.querySelector('pre').textContent = '—';
       }
     }
+
+    function clearTriggers() {
+      $triggerRow.style.display = 'none';
+      $triggerButtons.innerHTML = '';
+    }
+
+    // ---- FPS counter (live) ----
+    let _fpsLastTs = 0;
+    let _fpsFrames = 0;
+    let _fpsAvg = 0;
+    function fpsLoop(ts) {
+      if (!_fpsLastTs) _fpsLastTs = ts;
+      _fpsFrames += 1;
+      const elapsed = ts - _fpsLastTs;
+      if (elapsed >= 1000) {
+        _fpsAvg = (_fpsFrames * 1000) / elapsed;
+        $fpsValue.textContent = _fpsAvg.toFixed(1);
+        _fpsFrames = 0;
+        _fpsLastTs = ts;
+      }
+      requestAnimationFrame(fpsLoop);
+    }
+    requestAnimationFrame(fpsLoop);
 
     if (typeof DrPlayer === 'undefined' || !DrPlayer.Player) {
       setStatus('FAIL: DrPlayer global или DrPlayer.Player не определены — bundle не загрузился.', 'fail');
@@ -183,15 +268,30 @@
 
     function ensurePlayer() {
       if (player) return player;
-      player = new DrPlayer.Player();
+      const autoPause = $chkAutoPause.checked;
+      player = new DrPlayer.Player({ autoPause });
+      log(`new Player({ autoPause: ${autoPause} })`);
       player.on('loaded', (payload) => {
         log(`event loaded: layerCount=${payload.layerCount}, triggers=[${payload.triggers.join(', ')}]`);
         renderPayload($payloadLoaded, 'loaded', payload);
-        // Авто-mount после loaded — Stage 4 контракт «mount после load
-        // показывает first frame».
+        // Авто-mount после loaded.
         try {
           player.mount($mountTarget);
           $btnUnmount.disabled = false;
+          // Setup trigger buttons.
+          if (Array.isArray(payload.triggers) && payload.triggers.length) {
+            $triggerRow.style.display = '';
+            $triggerButtons.innerHTML = '';
+            for (const name of payload.triggers) {
+              const btn = document.createElement('button');
+              btn.textContent = `▶ ${name}`;
+              btn.addEventListener('click', () => {
+                const matched = player.trigger(name);
+                log(`player.trigger("${name}") → ${matched ? 'matched' : 'NO handler'}`);
+              });
+              $triggerButtons.appendChild(btn);
+            }
+          }
         } catch (err) {
           log(`player.mount() threw: ${err.message}`, 'error');
         }
@@ -205,6 +305,11 @@
         renderPayload($payloadMounted, '', {});
         $payloadMounted.querySelector('h4').textContent = '(unmounted)';
         $btnUnmount.disabled = true;
+        clearTriggers();
+      });
+      player.on('trigger', (payload) => {
+        log(`event trigger: name="${payload.name}" source="${payload.source}"`);
+        renderPayload($payloadTrigger, 'mounted', payload);
       });
       player.on('error', (payload) => {
         log(`event error: code=${payload.code} message="${payload.message}"`, 'error');
@@ -215,6 +320,7 @@
 
     async function loadFromUrl(url) {
       clearPayloads();
+      clearTriggers();
       $btnUnmount.disabled = true;
       const p = ensurePlayer();
       try {
@@ -226,6 +332,7 @@
       }
     }
 
+    $btnStage5.addEventListener('click', () => loadFromUrl('fixtures/stage5.dr.zip'));
     $btnStage4.addEventListener('click', () => loadFromUrl('fixtures/stage4.dr.zip'));
     $btnStage3.addEventListener('click', () => loadFromUrl('fixtures/stage3.dr.zip'));
 
@@ -233,6 +340,7 @@
       const file = ev.target.files && ev.target.files[0];
       if (!file) return;
       clearPayloads();
+      clearTriggers();
       $btnUnmount.disabled = true;
       const p = ensurePlayer();
       try {
@@ -250,6 +358,7 @@
       }
       player = null;
       clearPayloads();
+      clearTriggers();
       $btnUnmount.disabled = true;
       log('Player сброшен');
     });
@@ -261,6 +370,10 @@
       } catch (err) {
         log(`player.unmount() threw: ${err.message}`, 'error');
       }
+    });
+
+    $chkAutoPause.addEventListener('change', () => {
+      log(`autoPause = ${$chkAutoPause.checked} (применится при следующем new Player)`);
     });
   </script>
 </body>

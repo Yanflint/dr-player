@@ -41,8 +41,49 @@ vi.mock('../src/lottie.js', () => {
   return { default: { loadAnimation } };
 });
 
+// IntersectionObserver (Stage 5): не реализован в jsdom. mount() с
+// `autoPause: true` (default) подписывает `<dr-player>` на observer для
+// pause при out-of-viewport. Глобальный mock — controllable spy через
+// `_lastInstance` static reference (теsты могут вручную fire callback
+// с `{ isIntersecting: true/false }` чтобы проверить _pause/_resume).
+/** @type {any} */
+let _lastIntersectionObserverInstance = null;
+class MockIntersectionObserver {
+  /** @param {(entries: any[]) => void} cb @param {any} [opts] */
+  constructor(cb, opts) {
+    this._cb = cb;
+    this._opts = opts;
+    this._observed = new Set();
+    this.disconnect = vi.fn(() => { this._observed.clear(); });
+    this.observe = vi.fn((/** @type {Element} */ el) => { this._observed.add(el); });
+    this.unobserve = vi.fn((/** @type {Element} */ el) => { this._observed.delete(el); });
+    this.takeRecords = vi.fn(() => []);
+    _lastIntersectionObserverInstance = this;
+  }
+  /** Test helper: дёрнуть callback с заданным isIntersecting. */
+  _fireIntersection(isIntersecting) {
+    const entries = [...this._observed].map((el) => ({
+      target: el,
+      isIntersecting,
+      intersectionRatio: isIntersecting ? 1 : 0,
+    }));
+    this._cb(entries);
+  }
+}
+/** @type {any} */
+const _globalScope = globalThis;
+_globalScope.IntersectionObserver = MockIntersectionObserver;
+/**
+ * Test helper: получить ссылку на последний созданный observer instance.
+ * @returns {any}
+ */
+export function getLastIntersectionObserver() {
+  return _lastIntersectionObserverInstance;
+}
+
 beforeEach(() => {
   let counter = 0;
   URL.createObjectURL = vi.fn(() => `blob:mock-${++counter}`);
   URL.revokeObjectURL = vi.fn();
+  _lastIntersectionObserverInstance = null;
 });
