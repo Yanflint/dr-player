@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  validate:
+    name: Validate structure + lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm install (dr-player)
+        run: npm install
+      - name: Check dr-runtime.lock present
+        run: |
+          if [ ! -f dr-runtime.lock ]; then
+            echo "::error::dr-runtime.lock отсутствует. Запусти 'npm run dr-runtime-sync' локально и commit."
+            exit 1
+          fi
+          echo "dr-runtime.lock OK:"
+          cat dr-runtime.lock
+
+  build:
+    name: Build dist/dr-player.min.js
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dr-player
+        uses: actions/checkout@v4
+        with:
+          path: dr-player
+      - name: Checkout deepreview (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: Yanflint/deepreview
+          ref: dev
+          path: deepreview
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: npm install (deepreview)
+        working-directory: deepreview/deepreview
+        run: npm install
+      - name: Build dr-runtime bundle (deepreview)
+        working-directory: deepreview/deepreview
+        run: npm run dr-runtime-build
+      - name: npm install (dr-player)
+        working-directory: dr-player
+        run: npm install
+      - name: Sync dr-runtime snapshot
+        working-directory: dr-player
+        env:
+          DEEPREVIEW_REPO_PATH: ${{ github.workspace }}/deepreview
+        run: npm run dr-runtime-sync
+      - name: Build dr-player bundle
+        working-directory: dr-player
+        run: npm run build
+      - name: Verify output
+        working-directory: dr-player
+        run: |
+          if [ ! -f dist/dr-player.min.js ]; then
+            echo "::error::dist/dr-player.min.js не создан"
+            exit 1
+          fi
+          ls -la dist/
+          echo "Size: $(wc -c < dist/dr-player.min.js) bytes"
