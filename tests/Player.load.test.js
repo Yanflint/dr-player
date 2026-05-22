@@ -19,7 +19,7 @@
 // каждого теста). Это даёт детерминистичные fixture'ы без зависимости от
 // внешнего файла.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import JSZip from 'jszip';
 import { Player, ERROR_CODES } from '../src/index.js';
 
@@ -119,14 +119,8 @@ function createPlayerWithRecorder() {
   return { player, events };
 }
 
-// jsdom может не иметь createObjectURL — добавим minimal mock если нет.
-beforeEach(() => {
-  if (typeof URL.createObjectURL !== 'function') {
-    let n = 0;
-    URL.createObjectURL = vi.fn(() => `blob:mock-${++n}`);
-    URL.revokeObjectURL = vi.fn();
-  }
-});
+// URL.createObjectURL / revokeObjectURL подменяются безусловно в
+// tests/setup.js (jsdom не реализует их по-настоящему).
 
 // ---- tests ----
 
