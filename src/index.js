@@ -1,6 +1,12 @@
-// dr-player public API entry. Stage 6 (2026-05-23) — Player.set(input, value)
-// + полный набор out-events. emit-event нода в IA editor (deepreview side)
-// при срабатывании зовёт `graphApi.emitOut(name, payload)` → плеер emit'ит
+// dr-player public API entry. Stage 8b (2026-05-23, ADR-0010) — Lottie
+// больше не часть .dr.zip формата. Lottie-слои в legacy .dr.zip
+// gracefully skip'аются (warning в console + counter skippedLottieLayers
+// в loaded / mounted events). IA-формат — наш собственный на channels +
+// eventGraph + Actions, альтернатива Lottie, не смесь.
+//
+// Stage 6 (2026-05-23) — Player.set(input, value) + полный набор
+// out-events. emit-event нода в IA editor (deepreview side) при
+// срабатывании зовёт `graphApi.emitOut(name, payload)` → плеер emit'ит
 // `event:<name>` к listener'ам разработчика через `player.on('event:<name>', cb)`.
 //
 // Stages эпика dr-player-v1:
@@ -9,17 +15,18 @@
 //   Stage 3 ✅ Player.load (.dr.zip parse + asset blob URLs).
 //   Stage 4 ✅ mount() Shadow DOM + static render.
 //   Stage 5 ✅ runtime (rAF + IntersectionObserver auto-pause).
-//   Stage 6 ✅ Player.set + полный набор out-events + emit-event nodе ← мы здесь.
-//   Stage 7 → editor integration (Preview-mode внутри IA-слоя через dr-player).
-//   Stage 8 → CDN publish + npm + docs для ok.ru.
+//   Stage 6 ✅ Player.set + полный набор out-events + emit-event nodе.
+//   Stage 7 ✅ editor integration (Preview-mode внутри IA-слоя через dr-player).
+//   Stage 8a ✅ publish prep (bundle split + README + npm-ready package.json).
+//   Stage 8b ✅ Lottie removal из IA-формата + JSZip 3.10.1 upgrade ← мы здесь.
+//   Stage 8c → npm publish + CDN setup (после готовности @deepreview org).
 
 import JSZip from './jszip.js';
-import lottie from './lottie.js';
 import * as runtime from './dr-runtime.js';
 import { createDrPlayerElement } from './customElement.js';
 import { createPlayAction } from './playAction.js';
 
-const STAGE = 6;
+const STAGE = '8b';
 
 // Современная major-версия формата `.dr.zip` которую этот плеер понимает.
 // Spec: формат запинан на "1.0" в M1 эпика interactive-animations-v1
@@ -79,12 +86,18 @@ export class Player {
     this._mounted = false;
     this._loaded = false;
     /**
+     * Stage 8b (2026-05-23, ADR-0010): `skippedLottieLayers` — counter
+     * Lottie-слоёв из legacy `.dr.zip` (формат позволяет, но dr-player их
+     * больше не рендерит). Считается при `load()`, прокидывается в
+     * `loaded` / `mounted` event payload — разработчик видит warning.
+     *
      * @type {null | {
      *   snap: import('./dr-runtime.js').DeserializedIaSnapshot,
      *   manifest: any,
      *   blobUrls: Map<string, string>,
      *   triggers: string[],
      *   inputs: any[],
+     *   skippedLottieLayers: number,
      * }}
      */
     this._state = null;
@@ -98,10 +111,13 @@ export class Player {
      * мог start'овать использовать API заранее (контракт стабилен, поведение
      * расширяется без breaking).
      *
+     * Stage 8b (2026-05-23, ADR-0010): `lottieInstances` удалён, Lottie больше
+     * не часть .dr.zip формата. `skippedLottieLayers` — counter Lottie-слоёв
+     * legacy `.dr.zip`, которые render proceeded но не нарисовал (gracefully).
+     *
      * @type {null | {
      *   parentEl: HTMLElement,
      *   drPlayerEl: HTMLElement & { _drStage: HTMLDivElement },
-     *   lottieInstances: Array<import('./lottie.js').LottieAnimationItem>,
      *   videos: HTMLVideoElement[],
      *   runtime: any,
      *   byId: Map<string, any>,
@@ -117,6 +133,7 @@ export class Player {
      *   observer: IntersectionObserver | null,
      *   playing: boolean,
      *   inputsState: Map<string, any>,
+     *   skippedLottieLayers: number,
      * }}
      */
     this._mount = null;
@@ -250,13 +267,29 @@ export class Player {
     const triggers = Array.isArray(manifest.triggers) ? manifest.triggers.slice() : [];
     const inputs = Array.isArray(manifest.inputs) ? manifest.inputs.slice() : [];
 
-    this._state = { snap, manifest, blobUrls, triggers, inputs };
+    // Stage 8b (ADR-0010): пересчитать Lottie-слои которые dr-player пропустит.
+    // Считаем сейчас (после deserialize), чтобы разработчик видел число в
+    // `loaded` event ещё до mount(). При mount() counter воспроизводится в
+    // render-loop'е (insurance — на случай если кто-то динамически добавил слой
+    // между load и mount).
+    let skippedLottieLayers = 0;
+    for (const L of snap.layers) {
+      if (L && L.type === 'lottie') skippedLottieLayers++;
+    }
+    if (skippedLottieLayers > 0) {
+      console.warn(
+        `[dr-player] В .dr.zip найдено ${skippedLottieLayers} Lottie-слоёв — будут пропущены при рендере. Lottie не часть IA-формата (см. ADR-0010 в репо Yanflint/deepreview).`
+      );
+    }
+
+    this._state = { snap, manifest, blobUrls, triggers, inputs, skippedLottieLayers };
     this._loaded = true;
 
     this._emit('loaded', {
       layerCount: snap.layers.length,
       triggers,
       inputs,
+      skippedLottieLayers,
     });
   }
 
@@ -264,23 +297,20 @@ export class Player {
    * Mount Player в `el` (страница хоста — ok.ru / любой сайт). Создаёт
    * `<dr-player>` custom element (closed Shadow DOM, изоляция стилей +
    * DOM), render'ит первый кадр всех слоёв из загруженного snapshot'а
-   * (PNG / Lottie / video / solid / text). После render'а Stage 5
-   * стартует runtime:
+   * (PNG / video / solid / text — Stage 8b убрал Lottie, см. ADR-0010).
+   * После render'а Stage 5 стартует runtime:
    *   • compileEventGraph + compileStarts + compileTriggers через
    *     dr-runtime — собирает action runner pipeline.
    *   • Sprite RAF-loop для PNG sprite слоёв.
    *   • IntersectionObserver auto-pause (порог 10%) — когда вне viewport
-   *     pause + Lottie.pause + video.pause; обратно — resume.
+   *     pause + video.pause; обратно — resume.
    *   • compileStarts auto-fire — синхронно ДО первой rAF tick'а, чтобы
    *     scene не «мелькала» idle перед NODE_START → Action.
    *
    * Опция `autoPause: false` (в constructor'е) — пропускает observer,
    * плеер играет сразу после mount'а.
    *
-   * Sync API: при возврате DOM уже attached. Lottie SVG-render появляется
-   * через ~1 frame после mount (нужен async fetch JSON ассета) — это
-   * нормальный pattern для Lottie web, тесты могут ждать через
-   * `vi.waitFor` или mock'ать `lottie.loadAnimation`.
+   * Sync API: при возврате DOM уже attached.
    *
    * @param {HTMLElement} el Контейнер на странице хоста.
    * @returns {void}
@@ -330,8 +360,6 @@ export class Player {
       }
     }
 
-    /** @type {Array<import('./lottie.js').LottieAnimationItem>} */
-    const lottieInstances = [];
     /** @type {HTMLVideoElement[]} */
     const videos = [];
     /** @type {Map<string, HTMLElement>} */
@@ -346,11 +374,13 @@ export class Player {
     /**
      * Контекст для type-specific render helpers. Все Maps/lists/refs
      * заполняются in-place. Stage 4 → Stage 5: добавлены sprites + per-layer
-     * play/stop колбэки.
+     * play/stop колбэки. Stage 8b (ADR-0010): добавлен `skippedLottieLayers`
+     * — render-loop увеличивает counter при встрече Lottie-слоя.
      */
     const renderCtx = {
-      lottieInstances, videos, nodesById,
+      videos, nodesById,
       playByLayerId, stopByLayerId, sprites,
+      skippedLottieLayers: 0,
     };
 
     try {
@@ -363,11 +393,6 @@ export class Player {
         }
       });
     } catch (cause) {
-      // Если render-loop упал — cleanup частично созданных Lottie / video
-      // и сообщаем caller'у. Это редкий случай (битый snapshot).
-      for (const inst of lottieInstances) {
-        try { inst.destroy(); } catch (_) {}
-      }
       const err = makeError(
         ERROR_CODES.MOUNT_FAILED,
         cause instanceof Error ? cause.message : String(cause),
@@ -447,7 +472,7 @@ export class Player {
     }
 
     this._mount = {
-      parentEl: el, drPlayerEl, lottieInstances, videos,
+      parentEl: el, drPlayerEl, videos,
       runtime: rt,
       byId, nodesById, playByLayerId, stopByLayerId,
       childrenByParent, actionsMap: snap.actions,
@@ -456,10 +481,18 @@ export class Player {
       observer: null,
       playing: false,
       inputsState,
+      skippedLottieLayers: renderCtx.skippedLottieLayers,
     };
     this._mounted = true;
 
-    this._emit('mounted', { width: canvasW, height: canvasH });
+    // Stage 8b (ADR-0010): `skippedLottieLayers` опционально в payload (только
+    // если > 0). Разработчик ok.ru может среагировать; обычный пользователь не
+    // видит лишнего поля.
+    const mountedPayload = { width: canvasW, height: canvasH };
+    if (renderCtx.skippedLottieLayers > 0) {
+      /** @type {any} */ (mountedPayload).skippedLottieLayers = renderCtx.skippedLottieLayers;
+    }
+    this._emit('mounted', mountedPayload);
 
     // compileStarts: auto-fire синхронно после `mounted` event. NODE_START —
     // entry-point'ы графа, стреляют сразу. Если autoPause включен, action'ы
@@ -484,17 +517,19 @@ export class Player {
 
   /**
    * Unmount: cancel rAF (sprite + action runs), disconnect IntersectionObserver,
-   * destroy Lottie instances, pause + reset video, удалить `<dr-player>` из
-   * DOM хоста. Идемпотент — повторный вызов no-op. blob URLs НЕ revoke'ятся
-   * здесь — это делает `destroy()` (caller может `mount → unmount → mount`
-   * без re-load).
+   * pause + reset video, удалить `<dr-player>` из DOM хоста. Идемпотент —
+   * повторный вызов no-op. blob URLs НЕ revoke'ятся здесь — это делает
+   * `destroy()` (caller может `mount → unmount → mount` без re-load).
+   *
+   * Stage 8b (2026-05-23, ADR-0010): Lottie instances больше не создаются —
+   * cleanup упрощён.
    *
    * @returns {void}
    */
   unmount() {
     if (!this._mount) return;
     const {
-      parentEl, drPlayerEl, lottieInstances, videos,
+      parentEl, drPlayerEl, videos,
       spriteRafId, observer, runningActions,
     } = this._mount;
 
@@ -512,9 +547,6 @@ export class Player {
     }
     if (observer) {
       try { observer.disconnect(); } catch (_) {}
-    }
-    for (const inst of lottieInstances) {
-      try { inst.destroy(); } catch (_) {}
     }
     for (const vid of videos) {
       try {
@@ -628,17 +660,26 @@ export class Player {
    * @param {Map<string, any>} byId Резолвер для effectiveMatrix / effectiveOpacity.
    * @param {Map<string, any>} library AssetRecord Map (assetId → record).
    * @param {{
-   *   lottieInstances: Array<import('./lottie.js').LottieAnimationItem>,
    *   videos: HTMLVideoElement[],
    *   nodesById: Map<string, HTMLElement>,
    *   playByLayerId: Map<string, (mode: 'once'|'loop') => void>,
    *   stopByLayerId: Map<string, () => void>,
    *   sprites: Array<any>,
+   *   skippedLottieLayers: number,
    * }} ctx
    * @returns {HTMLElement | null}
    */
   _renderLayer(L, idx, byId, library, ctx) {
     if (L.hidden) {
+      return null;
+    }
+
+    // Stage 8b (2026-05-23, ADR-0010): Lottie-слой не рендерится. Если legacy
+    // .dr.zip содержит такой слой — skip + увеличить counter (он попадёт в
+    // mounted event payload). Не возвращаем DOM-ноду — слой не занимает место,
+    // не появляется в Shadow root.
+    if (L.type === 'lottie') {
+      ctx.skippedLottieLayers++;
       return null;
     }
 
@@ -660,8 +701,6 @@ export class Player {
 
     if (type === 'png') {
       this._renderPng(node, L, payload, ctx);
-    } else if (type === 'lottie') {
-      this._renderLottie(node, L, payload, ctx);
     } else if (type === 'video') {
       this._renderVideo(node, L, payload, ctx);
     } else if (type === 'solid') {
@@ -798,90 +837,6 @@ export class Player {
   }
 
   /**
-   * Lottie слой — SVG-renderer + animationData из payload (inline JSON
-   * или fetch blob:URL). Stage 5: регистрирует play/stop callbacks +
-   * cycle listener для fireCycle при complete / loopComplete.
-   *
-   * @param {HTMLElement} node
-   * @param {any} L
-   * @param {any} payload
-   * @param {any} ctx renderCtx — lottieInstances + play/stop maps.
-   */
-  _renderLottie(node, L, payload, ctx) {
-    const container = document.createElement('div');
-    container.className = 'dr-lottie';
-    node.appendChild(container);
-
-    const inlineJSON = payload && payload.lottieJSON;
-    const url = payload && payload.dataURL;
-
-    const launch = (animationData) => {
-      if (!animationData) return;
-      try {
-        const anim = lottie.loadAnimation({
-          container,
-          renderer: 'svg',
-          loop: !!L.loop,
-          // По умолчанию НЕ играет — стартует через playByLayerId (Action
-          // runner) или IntersectionObserver resume (auto-play loop'ов).
-          autoplay: false,
-          animationData,
-          rendererSettings: { preserveAspectRatio: 'none' },
-        });
-        try { anim.goToAndStop(0, true); } catch (_) {}
-        ctx.lottieInstances.push(anim);
-
-        // Cycle listener: fireCycle для Animation 'done' subgraph'ов.
-        try {
-          if (anim.addEventListener) {
-            anim.addEventListener('complete', () => {
-              try {
-                if (anim.goToAndStop) anim.goToAndStop(0, true);
-              } catch (_) {}
-              try { runtime.fireCycle(L.id); } catch (_) {}
-            });
-            anim.addEventListener('loopComplete', () => {
-              try { runtime.fireCycle(L.id); } catch (_) {}
-            });
-          }
-        } catch (_) {}
-
-        ctx.playByLayerId.set(L.id, (/** @type {'once'|'loop'} */ mode) => {
-          try {
-            if (typeof anim.loop !== 'undefined') anim.loop = mode === 'loop';
-            anim.stop();
-            anim.play();
-          } catch (_) {}
-        });
-        ctx.stopByLayerId.set(L.id, () => { try { anim.pause(); } catch (_) {} });
-
-        // Если loop — авто-старт (симметрично previewMain). Sprite/loop
-        // у Lottie проигрывается через web-lottie свой rAF, не наш.
-        if (L.loop) {
-          try { anim.play(); } catch (_) {}
-        }
-      } catch (err) {
-        console.error('[dr-player] lottie.loadAnimation failed:', err);
-      }
-    };
-
-    if (inlineJSON) {
-      launch(inlineJSON);
-      return;
-    }
-    if (typeof url === 'string' && url) {
-      // Async fetch + parse. mount() возвращает sync, Lottie появляется
-      // через ~1 RAF после fetch. Errors → console.error без падения.
-      fetch(url)
-        .then((r) => r.json())
-        .then(launch)
-        .catch((err) => {
-          console.error('[dr-player] Lottie fetch failed:', err);
-        });
-    }
-  }
-
-  /**
    * Video слой. Stage 5: register play/stop callbacks + ended listener для
    * fireCycle (Animation 'done').
    *
@@ -992,10 +947,12 @@ export class Player {
 
   /**
    * Stage 5: запустить (или восстановить после pause) playback. Стартует
-   * sprite RAF + resume Lottie / video. Action runner'ы стартуют сами
-   * через trigger / compileStarts (rAF tick'и продолжаются независимо
-   * от observer'а — это accept'ed для V1; будущая оптимизация — pause
-   * также Action'ы при out-of-viewport).
+   * sprite RAF + resume video. Action runner'ы стартуют сами через trigger /
+   * compileStarts (rAF tick'и продолжаются независимо от observer'а — это
+   * accept'ed для V1; будущая оптимизация — pause также Action'ы при
+   * out-of-viewport).
+   *
+   * Stage 8b (2026-05-23, ADR-0010): Lottie instances больше не создаются.
    */
   _resume() {
     if (!this._mount || this._mount.playing) return;
@@ -1004,19 +961,17 @@ export class Player {
     if (this._mount.sprites.length > 0 && !this._mount.spriteRafId) {
       this._startSpriteRaf();
     }
-    // Lottie / video resume.
-    for (const inst of this._mount.lottieInstances) {
-      try { if (typeof inst.play === 'function') inst.play(); } catch (_) {}
-    }
     for (const vid of this._mount.videos) {
       try { vid.play().catch(() => {}); } catch (_) {}
     }
   }
 
   /**
-   * Stage 5: pause sprite RAF + Lottie + video. Action runner'ы продолжают
-   * rAF tick (см. _resume note); каждая tick — это мутация JS-объекта Layer
-   * + DOM-write через syncLayerDom — minimal CPU когда не в viewport.
+   * Stage 5: pause sprite RAF + video. Action runner'ы продолжают rAF tick
+   * (см. _resume note); каждая tick — это мутация JS-объекта Layer + DOM-write
+   * через syncLayerDom — minimal CPU когда не в viewport.
+   *
+   * Stage 8b (2026-05-23, ADR-0010): Lottie instances больше не создаются.
    */
   _pause() {
     if (!this._mount || !this._mount.playing) return;
@@ -1025,9 +980,6 @@ export class Player {
       try { cancelAnimationFrame(this._mount.spriteRafId); } catch (_) {}
       this._mount.spriteRafId = 0;
       this._mount.spriteLastTs = 0;
-    }
-    for (const inst of this._mount.lottieInstances) {
-      try { if (typeof inst.pause === 'function') inst.pause(); } catch (_) {}
     }
     for (const vid of this._mount.videos) {
       try { vid.pause(); } catch (_) {}
@@ -1181,5 +1133,5 @@ export class Player {
 
 export { runtime };
 
-export const VERSION = '1.0.0-alpha.5';
+export const VERSION = '1.0.0-beta.2';
 export const STAGE_NUMBER = STAGE;

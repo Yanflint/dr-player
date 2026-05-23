@@ -308,6 +308,48 @@ describe('Player.load — manifest variations', () => {
     expect(events[0].payload.triggers).toEqual([]);
     expect(events[0].payload.inputs).toEqual([]);
   });
+
+  it('11b. skippedLottieLayers = 0 когда Lottie-слоёв нет', async () => {
+    // Stage 8b (ADR-0010): обычный .dr.zip без Lottie — counter = 0.
+    const blob = await buildZip();
+    const { player, events } = createPlayerWithRecorder();
+    await player.load(blob);
+    expect(events[0].payload.skippedLottieLayers).toBe(0);
+  });
+
+  it('11c. Lottie-слои в legacy .dr.zip → counter в payload + console.warn', async () => {
+    // Stage 8b (ADR-0010): legacy .dr.zip может содержать Lottie-слои —
+    // считаем и предупреждаем разработчика.
+    const cfg = makeCfg({
+      layers: [
+        { id: 'PNG1', type: 'png', name: 'Pic', assetId: 'asset_1' },
+        { id: 'L1', type: 'lottie', assetId: 'la1', w: 100, h: 100 },
+        { id: 'L2', type: 'lottie', assetId: 'la2', w: 100, h: 100 },
+      ],
+      _assets: [
+        ['asset_1', { kind: 'png', payload: { dataURL: 'assets/asset_1.png', width: 1, height: 1 } }],
+        ['la1', { kind: 'lottie', payload: { lottieJSON: { v: '5.7', layers: [] } } }],
+        ['la2', { kind: 'lottie', payload: { lottieJSON: { v: '5.7', layers: [] } } }],
+      ],
+    });
+    const blob = await buildZip({ cfg });
+    const { player, events } = createPlayerWithRecorder();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await player.load(blob);
+      expect(events[0].event).toBe('loaded');
+      expect(events[0].payload.skippedLottieLayers).toBe(2);
+      // layerCount всё ещё считает Lottie-слои в общем числе (raw из snap).
+      expect(events[0].payload.layerCount).toBe(3);
+      // console.warn вызван с упоминанием ADR-0010.
+      expect(warnSpy).toHaveBeenCalled();
+      const warnCall = warnSpy.mock.calls[0][0];
+      expect(warnCall).toContain('Lottie');
+      expect(warnCall).toContain('ADR-0010');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe('Player.load — lifecycle', () => {

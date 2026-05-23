@@ -5,9 +5,13 @@
 // Player.mount(el) создаёт экземпляр `<dr-player>` и вставляет его в `el`
 // (страница хоста — ok.ru / любой сайт разработчика). Внутри `<dr-player>` —
 // closed Shadow DOM с isolated styles + stage area, куда mount-логика
-// добавляет per-layer DOM (img / video / lottie SVG container / solid div /
-// text div). После attach'а страница хоста видит только `<dr-player>` —
-// внутренний DOM невидим через `document.querySelector` ХОСТА.
+// добавляет per-layer DOM (img / video / solid div / text div). После
+// attach'а страница хоста видит только `<dr-player>` — внутренний DOM
+// невидим через `document.querySelector` ХОСТА.
+//
+// Stage 8b (2026-05-23, ADR-0010): убраны Lottie-слои из IA-формата —
+// `.dr-lottie` контейнер больше не создаётся в render-loop'е (Lottie
+// graceful skip'ается без DOM-узла), CSS-класс удалён.
 //
 // **Что даёт Shadow DOM (см. spec эпика → Архитектурное решение 1):**
 // 1. Стили страницы хоста (`body * { color: red }`) не текут в плеер.
@@ -35,9 +39,8 @@ const TAG = 'dr-player';
 // Inline стили Shadow root. `:host` — стилизация самого `<dr-player>`
 // элемента (он block по умолчанию, чтобы width/height на нём срабатывали).
 // `.dr-stage` — контейнер всех слоёв (canvas size IA-слоя).
-// `.dr-layer` — каждый слой; transform применяется тут, internal img/video/svg
-// растягивается на 100% (но Lottie SVG имеет свой rendererSettings —
-// preserveAspectRatio: 'none' уже учитан в mount logic).
+// `.dr-layer` — каждый слой; transform применяется тут, internal img/video
+// растягивается на 100%.
 const SHADOW_STYLES = `
 :host {
   display: block;
@@ -60,10 +63,6 @@ const SHADOW_STYLES = `
 .dr-layer img,
 .dr-layer video {
   display: block;
-  width: 100%;
-  height: 100%;
-}
-.dr-layer .dr-lottie {
   width: 100%;
   height: 100%;
 }

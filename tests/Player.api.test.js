@@ -15,7 +15,8 @@
 //  11.  emit-event без name → compile null → emit НЕ срабатывает.
 //  12.  emit-event с пустым payload string → emit с payload: null.
 //
-// **Setup:** lottie + IntersectionObserver mock'аны в tests/setup.js.
+// **Setup:** IntersectionObserver mock'ан в tests/setup.js. Stage 8b — Lottie
+// mock убран вместе с самой библиотекой (ADR-0010).
 //   URL.createObjectURL / revokeObjectURL stub'нуты в beforeEach.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

@@ -3,8 +3,8 @@
 > JS-плеер для интерактивных анимаций Deepreview (формат `.dr.zip`). Один
 > файл, Shadow DOM-изоляция, CSP-friendly, IntersectionObserver auto-pause.
 
-**Версия:** `1.0.0-beta.1` (Stage 8a эпика dr-player-v1, 2026-05-23).
-**Bundle:** ~367 KB minified, ~125 KB gzipped.
+**Версия:** `1.0.0-beta.2` (Stage 8b эпика dr-player-v1, 2026-05-23).
+**Bundle:** ~144 KB minified, ~50 KB gzipped.
 
 ---
 
@@ -13,7 +13,13 @@
 dr-player проигрывает виджет, экспортированный из редактора Deepreview в
 формате `.dr.zip`. Внутри `.dr.zip` — `manifest.json` (метаданные + список
 триггеров и input'ов), `cfg.json` (граф событий, слои, actions), папка
-`assets/` (PNG / Lottie / video).
+`assets/` (PNG / video).
+
+`.dr.zip` — наш собственный формат интерактивных анимаций на channels +
+eventGraph + Actions. **Альтернатива Lottie**, не смесь — Lottie-слои не
+поддерживаются (см. [ADR-0010](https://github.com/Yanflint/deepreview/blob/dev/docs/adr/0010-lottie-not-part-of-ia-format.md)).
+Используй Lottie для линейных анимаций без интерактива (через свой плеер
+`lottie-web`), а `.dr.zip` — когда нужны триггеры / inputs / out-events.
 
 Что делает плеер при загрузке:
 
@@ -21,14 +27,13 @@ dr-player проигрывает виджет, экспортированный 
    inline в bundle, никакого сетевого второго запроса).
 2. Создаёт `<dr-player>` custom element с **closed** Shadow DOM —
    стили хост-страницы не текут внутрь, стили плеера не текут наружу.
-3. Рендерит первый кадр всех слоёв (PNG / Lottie SVG / `<video>` / solid /
-   text).
+3. Рендерит первый кадр всех слоёв (PNG / `<video>` / solid / text).
 4. Компилирует граф событий: `Start` ноды стреляют сразу, `Event(trigger)`
    ноды ждут `player.trigger(name)`, Action runner двигает слои по
    keyframe'ам.
 5. Подписывается на `IntersectionObserver` (threshold 0.1) — при выходе
-   виджета из viewport останавливает sprite RAF / Lottie / video, при
-   возврате — resume. Это критично для лент с десятками виджетов.
+   виджета из viewport останавливает sprite RAF / video, при возврате —
+   resume. Это критично для лент с десятками виджетов.
 
 ---
 
@@ -43,9 +48,9 @@ dr-player проигрывает виджет, экспортированный 
   <meta charset="utf-8">
   <title>Hello dr-player</title>
 
-  <!-- Production: cdn.deepreview.com/dr-player@1.0.0.min.js (после Stage 8b).
+  <!-- Production: cdn.deepreview.com/dr-player@1.0.0.min.js (после Stage 8c).
        Universal: jsdelivr автоматически serve'ит npm-package. -->
-  <script src="https://cdn.jsdelivr.net/npm/@deepreview/player@1.0.0-beta.1/dist/dr-player.min.js"
+  <script src="https://cdn.jsdelivr.net/npm/@deepreview/player@1.0.0-beta.2/dist/dr-player.min.js"
           defer></script>
 </head>
 <body>
@@ -120,7 +125,7 @@ production CDN после Stage 8b.)
 | `<script>` injection | нет | — |
 | `<style>` через innerHTML | нет | — |
 | `<style>` через `createElement` (CSP-OK) | да, в Shadow root | — |
-| `blob:` URLs для ассетов | да (PNG / Lottie / video) | `data:` URLs |
+| `blob:` URLs для ассетов | да (PNG / video) | `data:` URLs |
 | Доступ к `document.cookie` / `localStorage` | нет | — |
 | Top-level `setTimeout` / `setInterval` | нет (только `requestAnimationFrame`) | — |
 
@@ -137,9 +142,9 @@ production CDN после Stage 8b.)
 
 **opts:**
 - `autoPause?: boolean = true` — при `true` плеер автоматически
-  останавливает sprite RAF / Lottie / video когда widget вне viewport
-  (через `IntersectionObserver`, threshold 0.1). При `false` — играет
-  всегда. Для лент с десятками виджетов — обязательно `true`. Для
+  останавливает sprite RAF / video когда widget вне viewport (через
+  `IntersectionObserver`, threshold 0.1). При `false` — играет всегда.
+  Для лент с десятками виджетов — обязательно `true`. Для
   fullscreen-баннера — `false`.
 
 ```js
@@ -186,9 +191,7 @@ blob URLs) и загружает заново. Удобно для лент гд
 ### `player.mount(el)`
 
 Создаёт `<dr-player>` внутри `el`, render'ит первый кадр всех слоёв,
-стартует runtime. Sync API: при возврате DOM уже attached. Lottie
-SVG-renderer появляется через ~1 RAF после mount'а (внутренний async
-fetch JSON-ассета).
+стартует runtime. Sync API: при возврате DOM уже attached.
 
 **el:** `HTMLElement` — контейнер на странице хоста.
 
@@ -197,15 +200,17 @@ fetch JSON-ассета).
 - Player не в `loaded` state (`mount` без `load`).
 
 Параллельно emit'ит `error` event. При успехе — `mounted` event с
-`{ width, height }`.
+`{ width, height, skippedLottieLayers? }`. `skippedLottieLayers`
+присутствует только если в `.dr.zip` были legacy Lottie-слои (значение —
+количество пропущенных).
 
 Повторный `mount(el)` — idempotent (unmount предыдущий → mount новый).
 
 ### `player.unmount()`
 
 Снимает плеер со страницы. Cancel sprite RAF, IntersectionObserver
-disconnect, Lottie destroy, video pause + load, removeChild
-`<dr-player>`. Идемпотент (повторный вызов — no-op).
+disconnect, video pause + load, removeChild `<dr-player>`. Идемпотент
+(повторный вызов — no-op).
 
 **Внимание:** blob URLs **не** revoke'ятся в `unmount` — caller может
 `mount → unmount → mount` без повторного `load`. Полный cleanup (revoke
@@ -253,12 +258,18 @@ listener'ы продолжают, throw уходит в `console.error`.
 
 | Event | Когда | Payload |
 |---|---|---|
-| `loaded` | После `load()` resolve | `{ layerCount, triggers: string[], inputs: any[] }` |
+| `loaded` | После `load()` resolve | `{ layerCount, triggers: string[], inputs: any[], skippedLottieLayers: number }` |
 | `error` | На любую ошибку | `{ code, message, cause? }` |
-| `mounted` | После `mount()` | `{ width, height }` |
+| `mounted` | После `mount()` | `{ width, height, skippedLottieLayers? }` (поле опционально, только если > 0) |
 | `unmounted` | После `unmount()` | `{}` |
 | `trigger` | При срабатывании любого триггера | `{ name, source: 'external' \| 'internal' }` |
 | `event:<name>` | При срабатывании Emit-ноды в графе | `{ payload: any }` |
+
+**`skippedLottieLayers`** (Stage 8b, ADR-0010): если в `.dr.zip` есть
+legacy Lottie-слои (тип `lottie` в `cfg.json`), они gracefully
+пропускаются плеером (не рендерятся, не занимают место). Counter в
+event payload — для UI feedback / telemetry разработчика. `console.warn`
+со ссылкой на ADR-0010 выводится при `load()`.
 
 `source: 'external'` = вызвал хост через `player.trigger()`;
 `source: 'internal'` = граф событий сработал сам (например, по таймеру
@@ -310,17 +321,25 @@ Refused to load the script ... violates Content Security Policy directive: "scri
 - `img-src` + `media-src` — обязательно `blob:` (плеер генерирует
   `blob:`-URLs для ассетов внутри `.dr.zip`).
 
-### Lottie не рендерится
+### Lottie не поддерживается в `.dr.zip`
 
-V1 поддерживает только **SVG renderer** Lottie. Если виджет содержит
-canvas/html renderer hint — Lottie проигнорирует и render'ит SVG. Это
-by design: canvas-renderer ~50 KB лишнего bundle'а; SVG-вьюпорт работает
-стабильно во всех поддерживаемых браузерах.
+С версии `1.0.0-beta.2` (Stage 8b, [ADR-0010](https://github.com/Yanflint/deepreview/blob/dev/docs/adr/0010-lottie-not-part-of-ia-format.md))
+dr-player НЕ рендерит Lottie-слои. Lottie — отдельный формат для линейных
+анимаций без интерактива; наш IA-формат `.dr.zip` — альтернатива для
+интерактивных виджетов (триггеры, inputs, цепочки событий), не смесь.
 
-Если плеер вообще не показывает Lottie:
-1. Открой DevTools → Network. Видишь ли запрос за blob? (Lottie JSON
-   передаётся внутри `.dr.zip`, fetch'а наружу не должно быть.)
-2. Открой Console. Видишь ли `[lottie]` warning? Возможно JSON битый.
+Если в твоём `.dr.zip` есть Lottie-слои (legacy архив, экспортированный
+до Stage 8b редактора Deepreview):
+- Они gracefully пропускаются с `console.warn` со ссылкой на ADR-0010.
+- `loaded` event payload содержит `skippedLottieLayers: <число>`.
+- `mounted` payload — то же поле опционально (только если > 0).
+- Плеер продолжает рендерить остальные слои (PNG / video / solid / text).
+
+Чтобы убрать Lottie-слои из архива: открой проект в редакторе Deepreview,
+пересоздай анимацию через Action на channels (наш формат), или вынеси
+Lottie в главный проект как отдельный слой и используй `.dr.zip` только
+для интерактивной части. Опция экспорта `omitLottieLayers: true` (по
+умолчанию) автоматически фильтрует Lottie из `.dr.zip`.
 
 ### Виджет «дёргается» при scroll
 
@@ -366,8 +385,9 @@ V2 рассматривает централизованный rAF (один loo
 | Метрика | Бюджет | Замечание |
 |---|---|---|
 | FPS | 60 при 10 виджетах (или 30 при 30) | На странице с auto-pause |
-| `.dr.zip` size | до 2 MB (warning при >5 MB на экспорте) | PNG + Lottie + video |
-| Memory per widget | до 10 MB | decoded PNG + Lottie state + canvas |
+| `.dr.zip` size | до 2 MB (warning при >5 MB на экспорте) | PNG + video |
+| Memory per widget | до 10 MB | decoded PNG + canvas |
+| Bundle size (плеер) | ~144 KB minified, ~50 KB gzipped (Stage 8b) | Без Lottie (ADR-0010) |
 | Time to first frame | <500 ms на medium device | После `load()` resolve + `mount()` |
 | Cold load | <2 s на 3G | CDN edge + Brotli |
 | Hot load (cache) | <200 ms | Browser cache + CDN |
@@ -376,8 +396,34 @@ V2 рассматривает централизованный rAF (один loo
 
 ## 🔁 Migration guide
 
-V1.0.0 — первый production release. Migration guide для будущих major
-bumps (V2.0.0+) будет добавляться сюда.
+### `1.0.0-beta.1` → `1.0.0-beta.2` (Stage 8b, 2026-05-23)
+
+**Breaking:** Lottie-слои в `.dr.zip` больше не рендерятся
+([ADR-0010](https://github.com/Yanflint/deepreview/blob/dev/docs/adr/0010-lottie-not-part-of-ia-format.md)).
+Это поведенческое изменение (не сигнальное `formatVersion` bump'а — он
+остаётся `1.0`).
+
+**Что нужно сделать:**
+- Если ты не используешь Lottie в `.dr.zip` — ничего, обновление
+  bundle прозрачное.
+- Если в `.dr.zip` есть Lottie-слои — они gracefully пропускаются с
+  `console.warn`. Поведение видимое в `loaded` / `mounted` event
+  payload (`skippedLottieLayers: number`). Bundle уменьшился с 367 KB
+  → 144 KB minified (-61%).
+- Чтобы избежать warning'ов — пересоберай `.dr.zip` в редакторе
+  Deepreview (опция `omitLottieLayers: true` в `exportInteractiveLayer`
+  по умолчанию включена и автоматически фильтрует Lottie из архива).
+
+**Что не сломалось:**
+- API `Player.load / mount / trigger / set / on / off / destroy` —
+  без изменений.
+- Out-events (`loaded` / `error` / `mounted` / `unmounted` / `trigger` /
+  `event:<name>`) — без изменений, только `loaded` / `mounted` получили
+  новое поле `skippedLottieLayers` (рекомендуется опционально).
+- `.dr.zip` `formatVersion` остаётся `1.0` — старые архивы загружаются
+  без `FORMAT_VERSION_MISMATCH`.
+
+### Будущие major bumps (V2.0.0+)
 
 **Правило:** `formatVersion` major bump в редакторе = dr-player major
 bump в плеере. Старый `@1.x` плеер на `.dr.zip` v2.0 → graceful `error`
@@ -400,7 +446,7 @@ Minor / patch bumps в плеере — backward-compatible (новые out-even
 npm install               # esbuild + vitest + jsdom
 npm run dr-runtime-sync   # копирует ../deepreview/dist/dr-runtime.js + lock
 npm run build             # esbuild → dist/dr-player.min.js
-npm test                  # vitest run (~50 unit-cases)
+npm test                  # vitest run (~55 unit-cases)
 npm run dev               # local serve :8090 → http://localhost:8090/tests/manual.html
 ```
 

@@ -1,5 +1,5 @@
 // Unit-тесты для Player.mount() / unmount() / destroy() (Stage 4 эпика
-// dr-player-v1, 2026-05-22).
+// dr-player-v1, 2026-05-22; Stage 8b 2026-05-23 — Lottie removed per ADR-0010).
 //
 // **Coverage:**
 //   1.  mount без load → throw + emit error MOUNT_FAILED.
@@ -7,23 +7,19 @@
 //   3.  PNG слой → `<dr-player>` + img с blob: URL внутри Shadow DOM.
 //   4.  Solid слой → div с правильным background-color.
 //   5.  Text слой → div с правильным textContent.
-//   6.  Lottie слой → lottie.loadAnimation вызван с правильным container.
+//   6.  Lottie слой в legacy .dr.zip → graceful skip + counter в mounted payload.
 //   7.  mount → `mounted` event с правильным width/height payload.
 //   8.  Transform matrix: rotation 90° → CSS matrix корректный.
 //   9.  Opacity propagation: parent.opacity=0.5 + child.opacity=0.5 → effective 0.25.
 //  10.  unmount → `unmounted` event + `<dr-player>` удалён из DOM хоста.
-//  11.  unmount → Lottie.destroy + video.pause вызваны.
+//  11.  unmount → video.pause вызван.
 //  12.  Повторный mount после unmount — работает.
 //  13.  destroy() после mount — unmount + revoke blob URLs.
 //  14.  Shadow DOM isolation: img снаружи (через document.querySelector) не виден.
-//
-// **Setup:** lottie.js глобально mock'нут в tests/setup.js (vi.mock).
-// Реальный 223KB UMD load не нужен — проверяем контракт вызова + cleanup.
 
 import { describe, it, expect, vi } from 'vitest';
 import JSZip from 'jszip';
 import { Player, ERROR_CODES } from '../src/index.js';
-import lottie from '../src/lottie.js';
 
 // ---- helpers (синхронизированы с Player.load.test.js) ----
 
@@ -196,36 +192,51 @@ describe('Player.mount — render по типу слоя', () => {
     }
   });
 
-  it('6. Lottie слой → lottie.loadAnimation вызван с правильным container + JSON', async () => {
+  it('6. Lottie слой в legacy .dr.zip → graceful skip (нет DOM-узла, counter в loaded + mounted)', async () => {
+    // Stage 8b (ADR-0010): Lottie больше не рендерится. Legacy .dr.zip с Lottie
+    // слоями должен gracefully skip их с warning + counter.
     const lottieJSON = { v: '5.7.4', ip: 0, op: 60, w: 100, h: 100, layers: [] };
     const cfg = makeCfg({
-      layers: [{ id: 'L1', type: 'lottie', assetId: 'la1', w: 100, h: 100, x: 0, y: 0 }],
+      layers: [
+        // Solid bg остаётся как обычный слой.
+        { id: 'bg', type: 'solid', color: '#000', w: 320, h: 240 },
+        // Lottie слой — пропустится.
+        { id: 'L1', type: 'lottie', assetId: 'la1', w: 100, h: 100, x: 0, y: 0 },
+      ],
       _assets: [['la1', { kind: 'lottie', payload: { lottieJSON } }]],
     });
     const blob = await buildZip(cfg, false);
-    const { player } = createRecorder();
-    await player.load(blob);
-
-    vi.mocked(lottie).loadAnimation.mockClear();
-
-    const host = document.createElement('div');
-    document.body.appendChild(host);
+    const { player, events } = createRecorder();
+    // warn от load (counter > 0) попадёт в console.warn — silence его.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      player.mount(host);
-      const calls = vi.mocked(lottie).loadAnimation.mock.calls;
-      expect(calls.length).toBe(1);
-      const opts = calls[0][0];
-      expect(opts.renderer).toBe('svg');
-      expect(opts.loop).toBe(false);
-      expect(opts.autoplay).toBe(false);
-      // deserializeIaSnapshot deep-clone'ит cfg — animationData = новый объект
-      // с тем же содержимым (не ref-identity исходному lottieJSON).
-      expect(opts.animationData).toStrictEqual(lottieJSON);
-      // container — внутри shadow root, проверяем что это HTMLElement с
-      // className 'dr-lottie'.
-      expect(opts.container.classList.contains('dr-lottie')).toBe(true);
+      await player.load(blob);
+      // loaded event payload содержит skippedLottieLayers: 1.
+      const loaded = events.find((e) => e.event === 'loaded');
+      expect(loaded).toBeTruthy();
+      expect(loaded.payload.skippedLottieLayers).toBe(1);
+      // console.warn вызван — разработчик видит warning.
+      expect(warnSpy).toHaveBeenCalled();
+
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      try {
+        player.mount(host);
+        // mounted event с counter (присутствует только если > 0).
+        const mounted = events.find((e) => e.event === 'mounted');
+        expect(mounted).toBeTruthy();
+        expect(mounted.payload.skippedLottieLayers).toBe(1);
+        // В Shadow DOM — только solid слой (Lottie пропущен, ноды не создано).
+        const stage = getStage(host);
+        const layers = stage.querySelectorAll('.dr-layer');
+        expect(layers.length).toBe(1);
+        // Старый CSS-класс dr-lottie не должен появиться.
+        expect(stage.querySelector('.dr-lottie')).toBeNull();
+      } finally {
+        document.body.removeChild(host);
+      }
     } finally {
-      document.body.removeChild(host);
+      warnSpy.mockRestore();
     }
   });
 });
@@ -337,15 +348,14 @@ describe('Player.unmount', () => {
     }
   });
 
-  it('11. unmount → Lottie.destroy + video.pause вызваны', async () => {
-    const lottieJSON = { v: '5.7.4', ip: 0, op: 60, w: 100, h: 100, layers: [] };
+  it('11. unmount → video.pause вызван', async () => {
+    // Stage 8b (ADR-0010): Lottie instances больше не создаются, cleanup
+    // упрощён до video + sprite RAF cancel'ов.
     const cfg = makeCfg({
       layers: [
-        { id: 'L1', type: 'lottie', assetId: 'la1', w: 100, h: 100 },
-        { id: 'L2', type: 'video', assetId: 'va1', w: 100, h: 100 },
+        { id: 'L1', type: 'video', assetId: 'va1', w: 100, h: 100 },
       ],
       _assets: [
-        ['la1', { kind: 'lottie', payload: { lottieJSON } }],
         ['va1', { kind: 'video', payload: { dataURL: 'assets/video.mp4', mimeType: 'video/mp4' } }],
       ],
     });
@@ -356,18 +366,13 @@ describe('Player.unmount', () => {
     const host = document.createElement('div');
     document.body.appendChild(host);
     try {
-      vi.mocked(lottie).loadAnimation.mockClear();
       player.mount(host);
-      const lottieCalls = vi.mocked(lottie).loadAnimation.mock.results;
-      expect(lottieCalls.length).toBe(1);
-      const lottieInst = lottieCalls[0].value;
       const stage = getStage(host);
       const video = stage.querySelector('video');
       expect(video).toBeTruthy();
       const videoPauseSpy = vi.spyOn(video, 'pause');
 
       player.unmount();
-      expect(lottieInst.destroy).toHaveBeenCalled();
       expect(videoPauseSpy).toHaveBeenCalled();
     } finally {
       document.body.removeChild(host);

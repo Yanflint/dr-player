@@ -160,7 +160,7 @@ export function createPlayAction(deps) {
       for (const trk of (a.tracks || [])) {
         if (!trk.layerId) continue;
 
-        // media-trigger каналы — discrete events (play/stop sprite/lottie/video).
+        // media-trigger каналы — discrete events (play/stop sprite/video).
         const channelDef = getChannelOrNull(trk.channel);
         if (channelDef && channelDef.kind === 'media-trigger') {
           const kfs = trk.keyframes || [];

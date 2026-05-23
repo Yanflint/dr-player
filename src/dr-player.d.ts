@@ -3,6 +3,10 @@
 // `src/index.js` (JSDoc-аннотации). Hand-written; держится синхронно с
 // runtime'ом, проверяется compile'ом + tests перед publish'ом.
 //
+// Stage 8b (2026-05-23, ADR-0010): Lottie больше не часть .dr.zip формата.
+// Lottie-слои в legacy .dr.zip → graceful skip + counter `skippedLottieLayers`
+// в LoadedPayload / MountedPayload (optional, проставляется только если > 0).
+//
 // Bundle подключается как IIFE → `window.DrPlayer.Player`. Эти типы
 // описывают тот же объект.
 
@@ -34,12 +38,25 @@ declare namespace DrPlayer {
     inputs: unknown[];
     /** Опционально в V1.x (резерв). */
     duration?: number;
+    /**
+     * Stage 8b (ADR-0010): количество Lottie-слоёв в legacy `.dr.zip`,
+     * которые dr-player пропустит при render'е. Всегда присутствует (0 если
+     * Lottie-слоёв нет). Разработчик может среагировать (warning UI,
+     * telemetry).
+     */
+    skippedLottieLayers: number;
   };
 
   /** Payload `mounted` event. */
   export type MountedPayload = {
     width: number;
     height: number;
+    /**
+     * Stage 8b (ADR-0010): дублирует counter из LoadedPayload — присутствует
+     * ТОЛЬКО если > 0 (опциональное поле). Подтверждение того, что render-loop
+     * увидел Lottie-слои и пропустил.
+     */
+    skippedLottieLayers?: number;
   };
 
   /** Payload `trigger` event. */
@@ -67,7 +84,7 @@ declare namespace DrPlayer {
     /**
      * Если true — `<dr-player>` следит за viewport через
      * IntersectionObserver (threshold 0.1); вне поля видимости sprite RAF /
-     * Lottie / video pause, при возврате — resume. Default: true.
+     * video pause, при возврате — resume. Default: true.
      *
      * Для лент с десятками виджетов — обязательно true. Для fullscreen-баннера
      * — false.
@@ -87,8 +104,7 @@ declare namespace DrPlayer {
 
     /**
      * Создать `<dr-player>` внутри `el` (closed Shadow DOM), render'ить
-     * первый кадр + запустить runtime. Sync API. Lottie SVG появляется через
-     * ~1 RAF.
+     * первый кадр + запустить runtime. Sync API.
      */
     mount(el: HTMLElement): void;
 

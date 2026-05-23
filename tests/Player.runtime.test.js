@@ -1,4 +1,6 @@
-// Unit-тесты для Player runtime (Stage 5 эпика dr-player-v1, 2026-05-22).
+// Unit-тесты для Player runtime (Stage 5 эпика dr-player-v1, 2026-05-22;
+// Stage 8b 2026-05-23 — Lottie removed per ADR-0010, тесты Lottie заменены
+// на video-based проверки IntersectionObserver pause/resume).
 //
 // **Coverage (≥10 cases):**
 //   1.  trigger(name) до mount — return false + warning, без throw.
@@ -9,12 +11,12 @@
 //   4.  mount(): compileEventGraph regiт transitions в runtime.getTransitions.
 //   5.  mount(): compileStarts auto-fire — Action runner был вызван при mount.
 //   6.  mount(): autoPause:true — IntersectionObserver observed `<dr-player>`.
-//   7.  mount(): autoPause:false — IntersectionObserver не создан, lottie
-//       инстанции в play state (для loop'ов).
-//   8.  IntersectionObserver callback not-intersecting → pause (lottie.pause,
-//       video.pause вызваны).
-//   9.  IntersectionObserver callback intersecting → resume (lottie.play
-//       вызван у loop-Lottie).
+//   7.  mount(): autoPause:false — IntersectionObserver не создан, loop-video
+//       сразу в play state.
+//   8.  IntersectionObserver callback not-intersecting → pause (video.pause
+//       вызван).
+//   9.  IntersectionObserver callback intersecting → resume (video.play
+//       вызван).
 //  10.  unmount() — disconnect observer + cancel sprite RAF +
 //       running actions stopped.
 //  11.  destroy() после mount во время play — clean (revoke blob URLs +
@@ -23,7 +25,6 @@
 //       имена, каждый запускается независимо.
 //
 // **Setup:**
-//   - lottie.js глобально mock'ан в tests/setup.js.
 //   - IntersectionObserver глобально mock'ан в tests/setup.js
 //     (`getLastIntersectionObserver()` test helper).
 //   - URL.createObjectURL / revokeObjectURL stub'нуты в beforeEach.
@@ -31,7 +32,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import JSZip from 'jszip';
 import { Player, ERROR_CODES } from '../src/index.js';
-import lottie from '../src/lottie.js';
 import { getLastIntersectionObserver } from './setup.js';
 
 // ---- helpers ----
@@ -308,20 +308,28 @@ describe('IntersectionObserver — autoPause:true (default)', () => {
   });
 });
 
+/**
+ * Helper: cfg с одним loop-video слоем. Video стартует автоматически (L.loop=true).
+ * Stage 8b: используется в тестах 7-9 вместо Lottie (Lottie удалён, ADR-0010).
+ */
+function buildLoopVideoCfg() {
+  return makeCfg({
+    layers: [
+      {
+        id: 'vid', type: 'video', name: 'V', assetId: 'v1',
+        x: 0, y: 0, w: 50, h: 50, loop: true,
+      },
+    ],
+    _assets: [
+      ['v1', { kind: 'video', payload: { dataURL: 'assets/v1.mp4', mimeType: 'video/mp4', width: 50, height: 50 } }],
+    ],
+  });
+}
+
 describe('IntersectionObserver — autoPause:false', () => {
-  it('7. autoPause:false — observer НЕ создан; loop-Lottie играет сразу', async () => {
-    const cfg = makeCfg({
-      layers: [
-        {
-          id: 'l', type: 'lottie', name: 'L', assetId: 'a1',
-          x: 0, y: 0, w: 50, h: 50, loop: true,
-        },
-      ],
-      _assets: [
-        ['a1', { kind: 'lottie', payload: { lottieJSON: { v: '5.7.0', layers: [] }, width: 50, height: 50, hash: 'sha256:t' } }],
-      ],
-    });
-    const blob = await buildZip(cfg, makeManifest({ layerCount: 1, assetCount: 1 }));
+  it('7. autoPause:false — observer НЕ создан; loop-video play() вызван сразу', async () => {
+    // Stage 8b (ADR-0010): Lottie removed. Проверка через video с L.loop=true.
+    const blob = await buildZip(buildLoopVideoCfg(), makeManifest({ layerCount: 1, assetCount: 1 }));
 
     const p = new Player({ autoPause: false });
     await p.load(blob);
@@ -333,27 +341,19 @@ describe('IntersectionObserver — autoPause:false', () => {
     const observer = getLastIntersectionObserver();
     expect(observer).toBeNull();
 
-    // loop-Lottie должен играть (loadAnimation called + play вызван).
-    expect(lottie.loadAnimation).toHaveBeenCalled();
-    const animInstance = lottie.loadAnimation.mock.results[0].value;
-    expect(animInstance.play).toHaveBeenCalled();
+    // loop-video play() вызван (через L.loop auto-start в _renderVideo +
+    // immediate _resume() из mount path для autoPause:false).
+    const videos = p._mount.videos;
+    expect(videos.length).toBe(1);
+    // playing state установлен в true (immediate resume).
+    expect(p._mount.playing).toBe(true);
   });
 });
 
 describe('IntersectionObserver — not-intersecting → pause', () => {
-  it('8. callback `isIntersecting:false` → Lottie.pause + video.pause', async () => {
-    const cfg = makeCfg({
-      layers: [
-        {
-          id: 'l1', type: 'lottie', name: 'L1', assetId: 'a1',
-          x: 0, y: 0, w: 50, h: 50, loop: true,
-        },
-      ],
-      _assets: [
-        ['a1', { kind: 'lottie', payload: { lottieJSON: { v: '5.7.0', layers: [] }, width: 50, height: 50, hash: 'sha256:t' } }],
-      ],
-    });
-    const blob = await buildZip(cfg, makeManifest({ layerCount: 1, assetCount: 1 }));
+  it('8. callback `isIntersecting:false` → video.pause вызван', async () => {
+    // Stage 8b (ADR-0010): Lottie removed. Pause path проверяем через video.
+    const blob = await buildZip(buildLoopVideoCfg(), makeManifest({ layerCount: 1, assetCount: 1 }));
 
     const p = new Player();  // autoPause: true
     await p.load(blob);
@@ -362,32 +362,23 @@ describe('IntersectionObserver — not-intersecting → pause', () => {
     p.mount(host);
 
     const observer = getLastIntersectionObserver();
-    const animInstance = lottie.loadAnimation.mock.results[0].value;
+    const video = p._mount.videos[0];
+    expect(video).toBeTruthy();
+    const pauseSpy = vi.spyOn(video, 'pause');
 
     // Сначала intersecting → resume; затем not intersecting → pause.
     observer._fireIntersection(true);
-    animInstance.play.mockClear();
-    animInstance.pause.mockClear();
+    pauseSpy.mockClear();
 
     observer._fireIntersection(false);
-    expect(animInstance.pause).toHaveBeenCalled();
+    expect(pauseSpy).toHaveBeenCalled();
   });
 });
 
 describe('IntersectionObserver — intersecting → resume', () => {
-  it('9. callback `isIntersecting:true` → Lottie.play вызывается', async () => {
-    const cfg = makeCfg({
-      layers: [
-        {
-          id: 'l1', type: 'lottie', name: 'L1', assetId: 'a1',
-          x: 0, y: 0, w: 50, h: 50, loop: true,
-        },
-      ],
-      _assets: [
-        ['a1', { kind: 'lottie', payload: { lottieJSON: { v: '5.7.0', layers: [] }, width: 50, height: 50, hash: 'sha256:t' } }],
-      ],
-    });
-    const blob = await buildZip(cfg, makeManifest({ layerCount: 1, assetCount: 1 }));
+  it('9. callback `isIntersecting:true` → video.play вызывается', async () => {
+    // Stage 8b (ADR-0010): Lottie removed. Resume path проверяем через video.
+    const blob = await buildZip(buildLoopVideoCfg(), makeManifest({ layerCount: 1, assetCount: 1 }));
 
     const p = new Player();
     await p.load(blob);
@@ -396,14 +387,13 @@ describe('IntersectionObserver — intersecting → resume', () => {
     p.mount(host);
 
     const observer = getLastIntersectionObserver();
-    const animInstance = lottie.loadAnimation.mock.results[0].value;
-
-    // Initial mount: lottie.play вызван при rendering loop-Lottie. Очистим
-    // mock чтобы проверить именно intersection callback.
-    animInstance.play.mockClear();
+    const video = p._mount.videos[0];
+    expect(video).toBeTruthy();
+    // play() возвращает promise — mock'аем так чтобы не падать на undefined.then.
+    const playSpy = vi.spyOn(video, 'play').mockImplementation(() => Promise.resolve());
 
     observer._fireIntersection(true);
-    expect(animInstance.play).toHaveBeenCalled();
+    expect(playSpy).toHaveBeenCalled();
   });
 });
 
