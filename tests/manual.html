@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>dr-player — Stage 5 manual test</title>
+  <title>dr-player — Stage 6 manual test</title>
   <style>
     html, body { background: #fff; }
     body {
@@ -108,17 +108,18 @@
 <body>
   <div id="fps-counter" class="fps-counter">FPS: <span id="fps-value">—</span></div>
 
-  <h1>dr-player — Stage 5 manual test</h1>
-  <p>Проверка <code>player.trigger(name)</code> + rAF loop + IntersectionObserver
-  auto-pause. После <code>loaded</code> плеер автоматически <code>mount</code>'ится.
-  Кнопка «Загрузить stage5.dr.zip» подгружает fixture с двумя триггерами
-  (jump / spin) и Action'ами, которые двигают / поворачивают слой. Скролл
-  вверх/вниз — IntersectionObserver включит pause/resume.</p>
+  <h1>dr-player — Stage 6 manual test</h1>
+  <p>Проверка <code>player.set(input, value)</code> + полный набор out-events
+  (<code>event:&lt;name&gt;</code> через emit-event ноду в графе). stage6.dr.zip
+  содержит auto-emit при mount (Start → Emit('ready', …)), trigger 'notify'
+  → Emit('notified', …), и jump/spin Action'ы из Stage 5. После
+  <code>loaded</code> плеер автоматически mount'ится.</p>
 
   <div id="status" class="status">Ожидание загрузки bundle…</div>
 
   <h3>Источник .dr.zip</h3>
   <div class="row">
+    <button id="btn-stage6">Загрузить stage6.dr.zip (Stage 6 out-events)</button>
     <button id="btn-stage5">Загрузить stage5.dr.zip (Stage 5 runtime smoke)</button>
     <button id="btn-stage4">Загрузить stage4.dr.zip (static)</button>
     <button id="btn-stage3">Загрузить stage3.dr.zip (1×1 PNG)</button>
@@ -139,6 +140,21 @@
   <div id="trigger-row" class="trigger-row" style="display:none;">
     <strong>Триггеры (стартуют Action'ы):</strong>
     <div id="trigger-buttons"></div>
+  </div>
+
+  <div id="set-row" class="trigger-row" style="display:none; background:#e8f5e9; border-color:#10b981;">
+    <strong style="color:#0a5d3d;">Stage 6 — player.set(input, value):</strong>
+    <div class="row" style="margin-top:6px;">
+      <input id="set-input-name" type="text" placeholder="имя input'а" value="volume" style="padding:6px; border:1px solid #ccc; border-radius:4px; font-size:14px; width:160px;" />
+      <input id="set-input-value" type="text" placeholder="значение (число / строка)" value="0.5" style="padding:6px; border:1px solid #ccc; border-radius:4px; font-size:14px; width:200px;" />
+      <button id="btn-set">player.set(…)</button>
+      <span id="set-feedback" style="font-size:13px; color:#0a5d3d;"></span>
+    </div>
+    <p style="font-size:12px; color:#666; margin-top:8px;">
+      Stage 6: значение сохраняется в <code>_mount.inputsState</code>. Реальная
+      активация (input → channel value через input-ноду графа) — Кругов 5+
+      IA эпика. До тех пор плеер просто хранит value для разработчика.
+    </p>
   </div>
 
   <div class="panel">
@@ -170,6 +186,12 @@
         <h4>Ожидаем…</h4>
         <pre>—</pre>
       </div>
+
+      <h3>Stage 6 — <code>event:&lt;name&gt;</code> (out-events)</h3>
+      <div id="payload-events" class="payload-box" style="background:#f0fdf4; border-color:#10b981;">
+        <h4>Ожидаем…</h4>
+        <pre id="events-log">—</pre>
+      </div>
     </div>
   </div>
 
@@ -193,6 +215,9 @@
     const $payloadMounted = document.getElementById('payload-mounted');
     const $payloadTrigger = document.getElementById('payload-trigger');
     const $payloadError = document.getElementById('payload-error');
+    const $payloadEvents = document.getElementById('payload-events');
+    const $eventsLog = document.getElementById('events-log');
+    const $btnStage6 = document.getElementById('btn-stage6');
     const $btnStage5 = document.getElementById('btn-stage5');
     const $btnStage4 = document.getElementById('btn-stage4');
     const $btnStage3 = document.getElementById('btn-stage3');
@@ -203,6 +228,11 @@
     const $mountTarget = document.getElementById('mount-target');
     const $triggerRow = document.getElementById('trigger-row');
     const $triggerButtons = document.getElementById('trigger-buttons');
+    const $setRow = document.getElementById('set-row');
+    const $setInputName = document.getElementById('set-input-name');
+    const $setInputValue = document.getElementById('set-input-value');
+    const $btnSet = document.getElementById('btn-set');
+    const $setFeedback = document.getElementById('set-feedback');
     const $fpsValue = document.getElementById('fps-value');
 
     function log(msg, kind) {
@@ -231,11 +261,29 @@
         box.querySelector('h4').textContent = 'Ожидаем…';
         box.querySelector('pre').textContent = '—';
       }
+      $payloadEvents.querySelector('h4').textContent = 'Ожидаем…';
+      $eventsLog.textContent = '—';
+      _eventsHistory = [];
     }
 
     function clearTriggers() {
       $triggerRow.style.display = 'none';
       $triggerButtons.innerHTML = '';
+      $setRow.style.display = 'none';
+      $setFeedback.textContent = '';
+    }
+
+    // Stage 6: храним последние out-events для display panel'я. Wildcard'а
+    // на `on('event:*', cb)` пока нет (V1 контракт — каждый event:<name>
+    // отдельным listener'ом). Поэтому подписываемся на конкретные имена из
+    // manifest.outEvents после loaded.
+    let _eventsHistory = [];
+    function logOutEvent(name, payload) {
+      const ts = new Date().toISOString().slice(11, 23);
+      _eventsHistory.unshift(`[${ts}] event:${name} → ${JSON.stringify(payload)}`);
+      if (_eventsHistory.length > 8) _eventsHistory.length = 8;
+      $payloadEvents.querySelector('h4').textContent = `🔔 ${name} (${_eventsHistory.length})`;
+      $eventsLog.textContent = _eventsHistory.join('\n');
     }
 
     // ---- FPS counter (live) ----
@@ -274,6 +322,19 @@
       player.on('loaded', (payload) => {
         log(`event loaded: layerCount=${payload.layerCount}, triggers=[${payload.triggers.join(', ')}]`);
         renderPayload($payloadLoaded, 'loaded', payload);
+
+        // Stage 6: подписаться на out-events из manifest.outEvents (если есть).
+        // Manifest.outEvents — список имён которые автор задеклариррован чтобы
+        // разработчик знал что слушать. В Stage 6 fixture: ready + notified.
+        // Player API контракт — `on('event:<name>', cb)`. Wildcard'а в V1 нет.
+        const outNames = Array.isArray(payload.outEvents) ? payload.outEvents : null;
+        // Fallback: если manifest.outEvents отсутствует, подписываемся на
+        // распространённые имена. Это надёжнее для ad-hoc fixture'ов.
+        const subscribeTo = outNames && outNames.length ? outNames : ['ready', 'notified', 'liked', 'tap'];
+        for (const name of subscribeTo) {
+          player.on(`event:${name}`, (p) => logOutEvent(name, p));
+        }
+
         // Авто-mount после loaded.
         try {
           player.mount($mountTarget);
@@ -292,6 +353,8 @@
               $triggerButtons.appendChild(btn);
             }
           }
+          // Stage 6: показать панель player.set после mount'а.
+          $setRow.style.display = '';
         } catch (err) {
           log(`player.mount() threw: ${err.message}`, 'error');
         }
@@ -332,9 +395,35 @@
       }
     }
 
+    $btnStage6.addEventListener('click', () => loadFromUrl('fixtures/stage6.dr.zip'));
     $btnStage5.addEventListener('click', () => loadFromUrl('fixtures/stage5.dr.zip'));
     $btnStage4.addEventListener('click', () => loadFromUrl('fixtures/stage4.dr.zip'));
     $btnStage3.addEventListener('click', () => loadFromUrl('fixtures/stage3.dr.zip'));
+
+    // Stage 6: player.set(input, value) handler.
+    $btnSet.addEventListener('click', () => {
+      if (!player) {
+        $setFeedback.textContent = 'Сначала загрузи .dr.zip и сделай mount';
+        $setFeedback.style.color = '#cc0033';
+        return;
+      }
+      const inputName = $setInputName.value.trim();
+      const rawValue = $setInputValue.value.trim();
+      // Попытка распарсить как число; если не число — оставляем как строку.
+      let value;
+      if (/^-?\d+(\.\d+)?$/.test(rawValue)) {
+        value = parseFloat(rawValue);
+      } else if (rawValue === 'true' || rawValue === 'false') {
+        value = rawValue === 'true';
+      } else {
+        value = rawValue;
+      }
+      player.set(inputName, value);
+      const stored = player._mount?.inputsState?.get(inputName);
+      $setFeedback.textContent = `сохранено: ${inputName} = ${JSON.stringify(stored)}`;
+      $setFeedback.style.color = '#0a5d3d';
+      log(`player.set("${inputName}", ${JSON.stringify(value)}) — inputsState size: ${player._mount?.inputsState?.size}`);
+    });
 
     $fileInput.addEventListener('change', async (ev) => {
       const file = ev.target.files && ev.target.files[0];

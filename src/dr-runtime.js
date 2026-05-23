@@ -1,5 +1,5 @@
 // dr-runtime.js — bundled shared runtime для Deepreview.
-// Build: 2026-05-22T20:20:22.642Z | deepreview HEAD: 7c58e563bb23
+// Build: 2026-05-23T06:32:01.980Z | deepreview HEAD: 22a78cd7cdfe
 // DO NOT EDIT — генерируется через `npm run dr-runtime-build` в Yanflint/deepreview.
 // Source: https://github.com/Yanflint/deepreview/tree/dev/deepreview/js/dr-runtime/
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -1104,7 +1104,7 @@ function layerSubtype(L) {
   if (L.type === "interactive-animation") return "\u0418\u043D\u0442\u0435\u0440\u0430\u043A\u0442\u0438\u0432\u043D\u0430\u044F";
   return L.type;
 }
-var NODE_EVENT, NODE_ANIMATION, NODE_LAYER, NODE_DELAY, NODE_ACTION, NODE_START, NODE_INTERACTIVE_ANIMATION, _nodeRegistry;
+var NODE_EVENT, NODE_ANIMATION, NODE_LAYER, NODE_DELAY, NODE_ACTION, NODE_START, NODE_INTERACTIVE_ANIMATION, NODE_EMIT_EVENT, _nodeRegistry;
 var init_model = __esm({
   "js/event-graph/dock/model.js"() {
     NODE_EVENT = "event";
@@ -1114,6 +1114,7 @@ var init_model = __esm({
     NODE_ACTION = "action";
     NODE_START = "start";
     NODE_INTERACTIVE_ANIMATION = "interactive-animation";
+    NODE_EMIT_EVENT = "emit-event";
     _nodeRegistry = null;
   }
 });
@@ -1250,6 +1251,25 @@ function compileInteractiveAnimation(spec, _children, api) {
     }
   };
 }
+function compileEmitEvent(spec, _children, api) {
+  const name = spec.name;
+  if (typeof name !== "string" || !name) return null;
+  const emitOut = api && typeof api.emitOut === "function" ? api.emitOut : null;
+  if (!emitOut) return null;
+  let payload = null;
+  if (typeof spec.payload === "string" && spec.payload.trim()) {
+    try {
+      payload = JSON.parse(spec.payload);
+    } catch (_) {
+    }
+  }
+  return (_ctx) => {
+    try {
+      emitOut(name, payload);
+    } catch (_) {
+    }
+  };
+}
 function compileDelay(spec, childrenBySocket) {
   const children = flatChildren(childrenBySocket);
   if (children.length === 0) return null;
@@ -1271,6 +1291,7 @@ var init_compileNodes = __esm({
       [NODE_ACTION]: compileAction,
       [NODE_LAYER]: compileLayer,
       [NODE_INTERACTIVE_ANIMATION]: compileInteractiveAnimation,
+      [NODE_EMIT_EVENT]: compileEmitEvent,
       [NODE_DELAY]: compileDelay
     };
   }
@@ -1885,7 +1906,10 @@ var init_nodes = __esm({
       [NODE_START]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3l8 5-8 5V3z"/></svg>',
       // IA-NODE: тот же символ что у IA-слоя в layer-list (плоская рамка с
       // линиями внутри — «контейнер с собственной анимацией»).
-      [NODE_INTERACTIVE_ANIMATION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7h6M5 10h4" stroke-linecap="round"/></svg>'
+      [NODE_INTERACTIVE_ANIMATION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7h6M5 10h4" stroke-linecap="round"/></svg>',
+      // Emit-event (Stage 6): прямоугольник со стрелкой наружу — «событие
+      // вылетает из плеера наружу к разработчику ok.ru».
+      [NODE_EMIT_EVENT]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h7M7 5l3 3-3 3M11 3h2v10h-2"/></svg>'
     };
     NODE_TYPES = {
       [NODE_EVENT]: {
@@ -2274,6 +2298,52 @@ var init_nodes = __esm({
         // триггера IA-слоя.
         compile: NODE_COMPILERS[NODE_INTERACTIVE_ANIMATION]
       },
+      // Stage 6 эпика dr-player-v1 (2026-05-23). Emit-event — terminal sink,
+      // отправляет out-event наружу к разработчику ok.ru (или любому хосту).
+      // Один input-сокет (по сигналу), два поля свойств: имя out-event'а и
+      // опциональный payload (статичный JSON). При срабатывании compile зовёт
+      // `api.emitOut(name, payload)` — в dr-player это превращается в emit
+      // `event:<name>` к listener'ам разработчика.
+      [NODE_EMIT_EVENT]: {
+        typeLabel: "Emit event",
+        // Колонка 3 — как Layer/IA-нода (terminal sink), удобно держать в правой
+        // крайней колонке.
+        layoutColumn: 3,
+        sockets: [
+          {
+            name: "trigger",
+            dir: "input",
+            dataType: "trigger",
+            accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION],
+            label: "\u0421\u0438\u0433\u043D\u0430\u043B"
+          }
+        ],
+        template: {
+          title: (n) => n.name || "\u2014 \u0438\u043C\u044F \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u043E",
+          subtitle: () => "out-event"
+        },
+        defaults() {
+          return { kind: NODE_EMIT_EVENT, name: "", payload: "" };
+        },
+        toViewModel(id, spec) {
+          const name = typeof spec.name === "string" ? spec.name : "";
+          const payload = typeof spec.payload === "string" ? spec.payload : "";
+          return {
+            id,
+            kind: NODE_EMIT_EVENT,
+            name,
+            payload,
+            label: name || "\u2014 \u0438\u043C\u044F \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u043E",
+            typeLabel: "Emit event"
+          };
+        },
+        propsFields: [
+          { type: "text", key: "name", label: "\u0418\u043C\u044F \u0441\u043E\u0431\u044B\u0442\u0438\u044F" },
+          { type: "textarea", key: "payload", label: "Payload (JSON, \u043E\u043F\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u043E)" }
+        ],
+        propsHint: '\u0421\u0442\u0440\u0435\u043B\u044F\u0435\u0442 \u043D\u0430\u0440\u0443\u0436\u0443 \u0441\u043E\u0431\u044B\u0442\u0438\u044F `event:<\u0438\u043C\u044F>` \u043F\u0440\u0438 \u0441\u0440\u0430\u0431\u0430\u0442\u044B\u0432\u0430\u043D\u0438\u0438. Payload \u2014 \u0441\u0442\u0430\u0442\u0438\u0447\u043D\u044B\u0439 JSON, \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0443 \u0447\u0435\u0440\u0435\u0437 `player.on("event:<\u0438\u043C\u044F>", cb)`. \u0415\u0441\u043B\u0438 payload \u043F\u0443\u0441\u0442\u043E\u0439 \u0438\u043B\u0438 \u043D\u0435\u0432\u0430\u043B\u0438\u0434\u043D\u044B\u0439 \u2014 listener \u043F\u043E\u043B\u0443\u0447\u0438\u0442 `{ payload: null }`.',
+        compile: NODE_COMPILERS[NODE_EMIT_EVENT]
+      },
       [NODE_DELAY]: {
         typeLabel: "\u0417\u0430\u0434\u0435\u0440\u0436\u043A\u0430",
         layoutColumn: 2,
@@ -2314,7 +2384,10 @@ var init_nodes = __esm({
       // IA-NODE: тот же accent что у `.layer-type-badge--interactive-animation`
       // в editor.css (orange `#fb923c`) — узнаваемо и не сливается с
       // Animation/Layer/Action.
-      [NODE_INTERACTIVE_ANIMATION]: "#fb923c"
+      [NODE_INTERACTIVE_ANIMATION]: "#fb923c",
+      // Emit-event (Stage 6): зелёный — символ «исходящий event». Не путать с
+      // Layer.play.green (light-green `#4ade80`); Emit чуть темнее (`#10b981`).
+      [NODE_EMIT_EVENT]: "#10b981"
     };
     setNodeRegistry(
       /** @type {import('./model.js').NodeRegistry} */

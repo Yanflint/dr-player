@@ -1,8 +1,8 @@
 {
-  "sha": "35a5d9e8685dbf28cc8c0d8695099713e313cee5",
-  "builtAt": "2026-05-22T20:24:00.250Z",
-  "hash": "37bfba90c2dd4b47656b2258735204787d47fb00fc8e2d9d9cd3e4ff79227671",
+  "sha": "22a78cd7cdfe611770de9a3132709829d6dfb596",
+  "builtAt": "2026-05-23T06:32:35.268Z",
+  "hash": "6a7d0d321bcd8ee2c7e85c9acfd4bd5ca468274845357f141fe6a4e5c770d8b0",
   "sourceRepo": "Yanflint/deepreview",
   "sourcePath": "deepreview/dist/dr-runtime.js",
-  "sizeBytes": 92132
+  "sizeBytes": 96416
 }

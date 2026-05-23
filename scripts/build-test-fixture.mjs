@@ -341,6 +341,130 @@ async function buildStage5() {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
+async function buildStage6() {
+  const pngId = 'asset_pink';
+  const pngPath = `assets/${pngId}.png`;
+
+  const manifest = {
+    formatVersion: '1.0',
+    name: 'Stage6 test fixture — out-events + auto-emit',
+    createdAt: '2026-05-23T00:00:00.000Z',
+    createdBy: 'dr-player test fixture builder',
+    canvas: { width: 320, height: 240 },
+    triggers: ['jump', 'spin', 'notify'],
+    inputs: [],
+    outEvents: ['ready', 'notified'],
+    layerCount: 2,
+    assetCount: 1,
+  };
+
+  // EventGraph для Stage 6:
+  //   • Start → Emit('ready', payload={"timestamp":1234,"stage":6})
+  //       (auto-fire при mount: разработчик ok.ru видит event:ready сразу).
+  //   • Event(trigger='jump') → Action 'jump_action' (как Stage 5).
+  //   • Event(trigger='spin') → Action 'spin_action' (как Stage 5, loop).
+  //   • Event(trigger='notify') → Emit('notified', payload={"reason":"clicked"})
+  //       (manual trigger: проверка emit'а через player.trigger('notify')).
+  const startId = 'start_emit';
+  const emitReadyId = 'emit_ready';
+  const evJumpId = 'ev_jump';
+  const evSpinId = 'ev_spin';
+  const evNotifyId = 'ev_notify';
+  const aJumpId = 'a_jump';
+  const aSpinId = 'a_spin';
+  const emitNotifyId = 'emit_notify';
+  const jumpActionId = 'jump_action';
+  const spinActionId = 'spin_action';
+
+  const cfg = {
+    canvas: { width: 320, height: 240 },
+    layers: [
+      {
+        id: 'bg', type: 'solid', name: 'Background',
+        color: '#1e3a5f', mode: 'layer',
+        x: 0, y: 0, w: 320, h: 240,
+      },
+      {
+        id: 'pic', type: 'png', name: 'Picture',
+        assetId: pngId,
+        x: 128, y: 88, w: 64, h: 64,
+        rotation: 0, opacity: 1,
+      },
+    ],
+    eventGraph: {
+      nodes: [
+        // Auto-emit при mount: Start → Emit('ready').
+        [startId, { id: startId, kind: 'start' }],
+        [emitReadyId, { id: emitReadyId, kind: 'emit-event', name: 'ready', payload: '{"timestamp":1234,"stage":6}' }],
+        // Reuse jump / spin Actions (как в Stage 5).
+        [evJumpId, { id: evJumpId, kind: 'event', sourceType: 'trigger', triggerName: 'jump' }],
+        [aJumpId,  { id: aJumpId,  kind: 'action', actionId: jumpActionId, mode: 'once', extrapolation: 'hold', blending: 'replace', priority: 0 }],
+        [evSpinId, { id: evSpinId, kind: 'event', sourceType: 'trigger', triggerName: 'spin' }],
+        [aSpinId,  { id: aSpinId,  kind: 'action', actionId: spinActionId, mode: 'loop', extrapolation: 'hold', blending: 'replace', priority: 0 }],
+        // Trigger 'notify' → Emit('notified').
+        [evNotifyId, { id: evNotifyId, kind: 'event', sourceType: 'trigger', triggerName: 'notify' }],
+        [emitNotifyId, { id: emitNotifyId, kind: 'emit-event', name: 'notified', payload: '{"reason":"clicked"}' }],
+      ],
+      edges: [
+        ['e1', { id: 'e1', from: { nodeId: startId, socket: 'fire' }, to: { nodeId: emitReadyId, socket: 'trigger' } }],
+        ['e2', { id: 'e2', from: { nodeId: evJumpId, socket: 'onClick' }, to: { nodeId: aJumpId, socket: 'trigger' } }],
+        ['e3', { id: 'e3', from: { nodeId: evSpinId, socket: 'onClick' }, to: { nodeId: aSpinId, socket: 'trigger' } }],
+        ['e4', { id: 'e4', from: { nodeId: evNotifyId, socket: 'onClick' }, to: { nodeId: emitNotifyId, socket: 'trigger' } }],
+      ],
+      layout: [],
+    },
+    actions: [
+      [jumpActionId, {
+        id: jumpActionId,
+        name: 'Jump',
+        playMode: 'once',
+        range: [0, 0.5],
+        duration: 0.5,
+        tracks: [
+          {
+            id: 'trk_jump_y',
+            layerId: 'pic',
+            channel: 'y',
+            keyframes: [
+              { time: 0,    value: 88, interpolation: 'linear' },
+              { time: 0.25, value: 30, interpolation: 'linear' },
+              { time: 0.5,  value: 88, interpolation: 'linear' },
+            ],
+          },
+        ],
+      }],
+      [spinActionId, {
+        id: spinActionId,
+        name: 'Spin',
+        playMode: 'loop',
+        range: [0, 1],
+        duration: 1,
+        tracks: [
+          {
+            id: 'trk_spin_rot',
+            layerId: 'pic',
+            channel: 'rotation',
+            keyframes: [
+              { time: 0, value: 0,   interpolation: 'linear' },
+              { time: 1, value: 360, interpolation: 'linear' },
+            ],
+          },
+        ],
+      }],
+    ],
+    meta: { title: 'Stage 6 out-events smoke', desc: 'auto-emit ready + manual notify' },
+    _assets: [
+      [pngId, { kind: 'png', payload: { dataURL: pngPath, width: 64, height: 64, hash: 'sha256:pink-test' } }],
+    ],
+  };
+
+  const zip = new JSZipPkg();
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  zip.file('cfg.json', JSON.stringify(cfg, null, 2));
+  zip.file(pngPath, makeSolidPng(64, 64, [0xff, 0x66, 0xaa]));
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
 async function main() {
   if (!existsSync(OUTDIR)) mkdirSync(OUTDIR, { recursive: true });
 
@@ -358,6 +482,11 @@ async function main() {
   const stage5Out = join(OUTDIR, 'stage5.dr.zip');
   writeFileSync(stage5Out, stage5);
   console.log(`[build-fixture] ✓ ${stage5Out} — ${stage5.length} bytes`);
+
+  const stage6 = await buildStage6();
+  const stage6Out = join(OUTDIR, 'stage6.dr.zip');
+  writeFileSync(stage6Out, stage6);
+  console.log(`[build-fixture] ✓ ${stage6Out} — ${stage6.length} bytes`);
 }
 
 main().catch((err) => {

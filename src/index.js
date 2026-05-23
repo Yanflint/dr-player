@@ -1,15 +1,15 @@
-// dr-player public API entry. Stage 5 (2026-05-22) — animations играют,
-// `player.trigger(name)` запускает action или event-chain. IntersectionObserver
-// auto-pause когда widget вне viewport (порог 10%). Sprite RAF-loop для PNG
-// sprite слоёв, Lottie / video play/pause по runtime state.
+// dr-player public API entry. Stage 6 (2026-05-23) — Player.set(input, value)
+// + полный набор out-events. emit-event нода в IA editor (deepreview side)
+// при срабатывании зовёт `graphApi.emitOut(name, payload)` → плеер emit'ит
+// `event:<name>` к listener'ам разработчика через `player.on('event:<name>', cb)`.
 //
 // Stages эпика dr-player-v1:
 //   Stage 1 ✅ extract dr-runtime в deepreview.
 //   Stage 2 ✅ создание Yanflint/dr-player + skeleton.
 //   Stage 3 ✅ Player.load (.dr.zip parse + asset blob URLs).
 //   Stage 4 ✅ mount() Shadow DOM + static render.
-//   Stage 5 ✅ runtime (rAF + IntersectionObserver auto-pause) ← мы здесь.
-//   Stage 6 → set/on/off расширения + полный набор out-events + emit-event node.
+//   Stage 5 ✅ runtime (rAF + IntersectionObserver auto-pause).
+//   Stage 6 ✅ Player.set + полный набор out-events + emit-event nodе ← мы здесь.
 //   Stage 7 → editor integration (Preview-mode внутри IA-слоя через dr-player).
 //   Stage 8 → CDN publish + npm + docs для ok.ru.
 
@@ -19,7 +19,7 @@ import * as runtime from './dr-runtime.js';
 import { createDrPlayerElement } from './customElement.js';
 import { createPlayAction } from './playAction.js';
 
-const STAGE = 5;
+const STAGE = 6;
 
 // Современная major-версия формата `.dr.zip` которую этот плеер понимает.
 // Spec: формат запинан на "1.0" в M1 эпика interactive-animations-v1
@@ -90,6 +90,14 @@ export class Player {
     this._state = null;
     /**
      * Mount-state. Заполняется в `mount(el)`, очищается в `unmount()`.
+     *
+     * Stage 6 (2026-05-23): добавлен `inputsState` — Map значений inputs API.
+     * `player.set(input, value)` пишет сюда; будущие input-ноды графа (Круг 5+
+     * IA эпика) будут читать через `graphApi.getInput`. Сейчас value хранится,
+     * но не консумируется графом — это «прокладка», чтобы разработчик ok.ru
+     * мог start'овать использовать API заранее (контракт стабилен, поведение
+     * расширяется без breaking).
+     *
      * @type {null | {
      *   parentEl: HTMLElement,
      *   drPlayerEl: HTMLElement & { _drStage: HTMLDivElement },
@@ -108,6 +116,7 @@ export class Player {
      *   runningActions: Set<() => void>,
      *   observer: IntersectionObserver | null,
      *   playing: boolean,
+     *   inputsState: Map<string, any>,
      * }}
      */
     this._mount = null;
@@ -392,15 +401,30 @@ export class Player {
 
     const rt = runtime.createRuntime();
 
+    // Stage 6 (2026-05-23): inputsState — store значений для Player.set'а.
+    // Заполняется через player.set(input, value); getInput предоставлен через
+    // graphApi для будущих input-нод графа (Круг 5+ IA эпика).
+    /** @type {Map<string, any>} */
+    const inputsState = new Map();
+
     // compileGraph collects transitions / triggers / starts из snap.eventGraph.
     // routeIaTrigger пока null — nested IA-слои внутри dr-player Stage 5 не
     // поддерживаются (это Stage 6/7 — потребует instantiation вложенных
     // Player'ов для each ia-layer).
+    //
+    // Stage 6 (2026-05-23): emitOut пробрасывает (name, payload) от emit-event
+    // ноды наружу как `event:<name>` к listener'ам разработчика.
+    // getInput — read-only геттер из inputsState для будущих input-нод графа.
     const graphApi = {
       playByLayerId,
       addCycleListener: runtime.addCycleListener,
       playAction: playActionApi.playAction,
       routeIaTrigger: null,
+      emitOut: (/** @type {string} */ name, /** @type {any} */ payload) => {
+        if (typeof name !== 'string' || !name) return;
+        this._emit(`event:${name}`, { payload });
+      },
+      getInput: (/** @type {string} */ name) => inputsState.get(name),
     };
 
     // compileEventGraph: layer-source transitions. dr-player Stage 5 пока
@@ -431,6 +455,7 @@ export class Player {
       runningActions,
       observer: null,
       playing: false,
+      inputsState,
     };
     this._mounted = true;
 
@@ -534,8 +559,35 @@ export class Player {
     return matched;
   }
 
-  set(_input, _value) {
-    throw new Error('[dr-player] Player.set — реализуется в Stage 6 эпика');
+  /**
+   * Установить значение named input — public API для разработчика на хост-
+   * стороне (например ok.ru — при scroll'е страницы или drag-handle widget'а
+   * двигать input анимации). Stage 6 эпика dr-player-v1 (2026-05-23) — public
+   * API контракт стабилен; реальная активация (input → channel value через
+   * input-ноду графа) — в Кругах 5+ IA эпика.
+   *
+   * Контракт:
+   * - До mount() — warning, no-op (без throw — разработчик может set'ить
+   *   значения параллельно с `await load`, чтобы они применились при mount'е).
+   *   В Stage 6 значение в этом случае теряется (mount создаёт свой
+   *   inputsState с нуля). Это accept'ed compromise — set до mount редко
+   *   нужен (real-world flow: load → mount → set по scroll).
+   * - После mount() — value сохраняется в inputsState. Повторный set с тем
+   *   же input — overwrite. Граф может читать через getInput (Круг 5+).
+   * - Пустое имя input ('' / null / undefined) — игнорируется без throw.
+   *
+   * @param {string} input Имя input'а (string, non-empty).
+   * @param {any} value Любое JSON-serializable значение (number / boolean /
+   *   string / object). Type validation — отдельная задача input-нод графа.
+   * @returns {void}
+   */
+  set(input, value) {
+    if (typeof input !== 'string' || !input) return;
+    if (!this._mount) {
+      console.warn('[dr-player] Player.set: вызван до mount() — значение не сохранено.');
+      return;
+    }
+    this._mount.inputsState.set(input, value);
   }
 
   on(event, cb) {
@@ -1129,5 +1181,5 @@ export class Player {
 
 export { runtime };
 
-export const VERSION = '1.0.0-alpha.4';
+export const VERSION = '1.0.0-alpha.5';
 export const STAGE_NUMBER = STAGE;
