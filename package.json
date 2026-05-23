@@ -1,24 +1,55 @@
 {
   "name": "@deepreview/player",
-  "version": "1.0.0-alpha.5",
-  "private": true,
+  "version": "1.0.0-beta.1",
   "type": "module",
-  "description": "JS-плеер для интерактивных анимаций Deepreview (формат .dr.zip).",
-  "main": "dist/dr-player.min.js",
+  "description": "JS-плеер для интерактивных анимаций Deepreview (формат .dr.zip). Shadow DOM isolation, CSP-friendly, IntersectionObserver auto-pause.",
+  "keywords": [
+    "deepreview",
+    "lottie",
+    "animation",
+    "interactive",
+    "widget",
+    "embed",
+    "shadow-dom",
+    "csp-friendly"
+  ],
+  "main": "./dist/dr-player.min.js",
+  "types": "./dist/dr-player.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/dr-player.d.ts",
+      "default": "./dist/dr-player.min.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "build-fixture": "node scripts/build-test-fixture.mjs",
     "dev": "npx serve -l 8090 --no-clipboard",
     "dr-runtime-sync": "node scripts/sync-dr-runtime.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm test && npm run build"
   },
   "license": "MIT",
   "author": "Yanflint",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Yanflint/dr-player.git"
+    "url": "git+https://github.com/Yanflint/dr-player.git"
   },
-  "homepage": "https://github.com/Yanflint/dr-player",
+  "homepage": "https://github.com/Yanflint/dr-player#readme",
+  "bugs": {
+    "url": "https://github.com/Yanflint/dr-player/issues"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "jszip": "^3.10.1"
   },

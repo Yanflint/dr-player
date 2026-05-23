@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>dr-player — CSP-restrictive smoke</title>
+
+  <!--
+    Минимальный restrictive CSP. Если плеер где-то использует eval /
+    inline script / inline style / dynamic <script> injection / fetch
+    наружу — браузер заблокирует и repotr в console error. После
+    загрузки страницы открой DevTools → Console и проверь что НЕТ
+    сообщений вида:
+        Refused to ... violates the following Content Security Policy directive
+    Если есть — это регрессия в bundle'е (нарушение CSP-friendly
+    invariant'а из vision эпика dr-player-v1).
+
+    Что разрешено:
+      default-src 'self'           — всё своё (страница + bundle)
+      script-src   'self'          — только наш bundle, без inline / eval
+      style-src    'self'          — только наши <link>, без inline
+      img-src      'self' blob:    — встроенные PNG из .dr.zip как blob:
+      media-src    'self' blob:    — видео из .dr.zip как blob:
+      connect-src  'self'          — fetch только за .dr.zip с этого хоста
+      base-uri 'none' object-src 'none' — на всякий случай
+
+    Запуск:
+      npm run dev          (serve :8090)
+      open http://localhost:8090/tests/csp-test.html
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self';
+    img-src 'self' blob:;
+    media-src 'self' blob:;
+    connect-src 'self';
+    base-uri 'none';
+    object-src 'none';
+  ">
+
+  <link rel="stylesheet" href="./csp-test.css">
+
+  <!-- defer гарантирует load после DOMContentLoaded. Никаких inline
+       <script> в этой странице — все вызовы Player в bundle-инициаторе
+       тоже относительный путь. -->
+  <script src="../dist/dr-player.min.js" defer></script>
+  <script src="./csp-test-bootstrap.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>CSP-restrictive smoke</h1>
+    <p>
+      Эта страница загружает <code>dr-player.min.js</code> +
+      <code>stage6.dr.zip</code> под restrictive CSP без
+      <code>unsafe-eval</code> / <code>unsafe-inline</code>.
+      Цель — поймать любые нарушения CSP-friendly invariant'а bundle'а.
+    </p>
+    <p>
+      Открой DevTools → Console. Должно быть пусто (никаких
+      <em>Refused to ... violates Content Security Policy</em>).
+      Если есть — это регрессия.
+    </p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Виджет</h2>
+      <div id="widget" style="width: 320px; height: 240px; border: 1px dashed #444;"></div>
+    </section>
+
+    <section>
+      <h2>Состояние</h2>
+      <pre id="status">— ожидание загрузки —</pre>
+    </section>
+
+    <section>
+      <h2>Out-events</h2>
+      <pre id="events"></pre>
+    </section>
+  </main>
+</body>
+</html>

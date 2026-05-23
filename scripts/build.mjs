@@ -23,7 +23,7 @@
 // это by design (single source of truth runtime'а в Yanflint/deepreview).
 
 import { build } from 'esbuild';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,6 +32,8 @@ const ROOT = resolve(__dirname, '..');
 
 const ENTRY = join(ROOT, 'src', 'index.js');
 const RUNTIME = join(ROOT, 'src', 'dr-runtime.js');
+const DTS_SRC = join(ROOT, 'src', 'dr-player.d.ts');
+const DTS_DST = join(ROOT, 'dist', 'dr-player.d.ts');
 const OUTFILE = join(ROOT, 'dist', 'dr-player.min.js');
 const OUTDIR = dirname(OUTFILE);
 
@@ -64,6 +66,16 @@ async function main() {
     },
     logLevel: 'info',
   });
+
+  // Stage 8a (2026-05-23): copy hand-written TypeScript-определений в dist/.
+  // Source of truth — src/dr-player.d.ts (коммитится в git). dist/dr-player.d.ts
+  // — build artifact (gitignored), но попадает в npm tarball через files field.
+  if (existsSync(DTS_SRC)) {
+    copyFileSync(DTS_SRC, DTS_DST);
+    console.log(`[build] ✓ dist/dr-player.d.ts — TypeScript definitions copied from src/`);
+  } else {
+    console.warn(`[build] ⚠ src/dr-player.d.ts не найден — TypeScript definitions не скопированы`);
+  }
 
   const st = statSync(OUTFILE);
   const sizeKb = (st.size / 1024).toFixed(1);

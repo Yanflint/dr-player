@@ -1,11 +1,7 @@
 // dr-runtime.js — bundled shared runtime для Deepreview.
-// Build: 2026-05-23T06:32:01.980Z | deepreview HEAD: 22a78cd7cdfe
+// Build: 2026-05-23T08:06:17.264Z | deepreview HEAD: 8175070c8897
 // DO NOT EDIT — генерируется через `npm run dr-runtime-build` в Yanflint/deepreview.
 // Source: https://github.com/Yanflint/deepreview/tree/dev/deepreview/js/dr-runtime/
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
 
 // js/anim-runtime/channelRegistry.js
 function toScaleObj(v) {
@@ -21,6 +17,343 @@ function numberLerp(a, b, k) {
 function vec2Lerp(a, b, k) {
   return { x: numberLerp(a.x, b.x, k), y: numberLerp(a.y, b.y, k) };
 }
+var positionChannel = {
+  name: "position",
+  type: "vec2",
+  kind: "transform",
+  interpolated: true,
+  defaultValue: { x: 0, y: 0 },
+  idleFields: ["x", "y"],
+  read: (L) => ({ x: Number(L.x) || 0, y: Number(L.y) || 0 }),
+  readIdle: (idle) => idle ? { x: idle.x, y: idle.y } : null,
+  write: (L, v) => {
+    if (v && typeof v === "object" && Number.isFinite(v.x)) L.x = v.x;
+    if (v && typeof v === "object" && Number.isFinite(v.y)) L.y = v.y;
+  },
+  snapshotIdleFields: (L, idle) => {
+    idle.x = Number(L.x) || 0;
+    idle.y = Number(L.y) || 0;
+  },
+  restoreIdleFields: (L, idle) => {
+    L.x = idle.x;
+    L.y = idle.y;
+  },
+  lerp: vec2Lerp,
+  blendAdd: (v, idle, firstVal) => {
+    if (!v || !firstVal || typeof v !== "object" || typeof firstVal !== "object") return v;
+    return {
+      x: (idle.x || 0) + ((v.x || 0) - (firstVal.x || 0)),
+      y: (idle.y || 0) + ((v.y || 0) - (firstVal.y || 0))
+    };
+  },
+  captureValueAt: (L) => ({ x: Number(L.x) || 0, y: Number(L.y) || 0 }),
+  isAtIdle: (L, idle) => {
+    const ix = Number.isFinite(idle.x) ? idle.x : 0;
+    const iy = Number.isFinite(idle.y) ? idle.y : 0;
+    return (L.x || 0) === ix && (L.y || 0) === iy;
+  },
+  writeToRec: (L, rec, { num: num2 }) => {
+    rec.x = num2(L.x);
+    rec.y = num2(L.y);
+  },
+  ui: {
+    block: "transform",
+    label: "\u041F\u043E\u0437\u0438\u0446\u0438\u044F",
+    popupHotkey: "1",
+    popupOrder: 1,
+    propsPanel: {
+      fields: [
+        { id: "kfPosX", label: "X", step: 1 },
+        { id: "kfPosY", label: "Y", step: 1 }
+      ],
+      read: (v) => [
+        String(Math.round(v?.x ?? 0)),
+        String(Math.round(v?.y ?? 0))
+      ],
+      write: ([xRaw, yRaw]) => {
+        const x = parseFloat(xRaw || "");
+        const y = parseFloat(yRaw || "");
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+      }
+    }
+  },
+  appliesTo: null,
+  cascadesToChildren: false
+};
+var rotationChannel = {
+  name: "rotation",
+  type: "number",
+  kind: "transform",
+  interpolated: true,
+  defaultValue: 0,
+  idleFields: ["rotation"],
+  read: (L) => Number.isFinite(L.rotation) ? L.rotation : 0,
+  readIdle: (idle) => idle ? idle.rotation ?? 0 : null,
+  write: (L, v) => {
+    if (typeof v === "number" && Number.isFinite(v)) L.rotation = v;
+  },
+  snapshotIdleFields: (L, idle) => {
+    idle.rotation = Number.isFinite(L.rotation) ? L.rotation : 0;
+  },
+  restoreIdleFields: (L, idle) => {
+    if (idle.rotation !== 0) L.rotation = idle.rotation;
+    else delete L.rotation;
+  },
+  lerp: numberLerp,
+  blendAdd: (v, idle, firstVal) => {
+    if (typeof v !== "number" || typeof firstVal !== "number" || !Number.isFinite(v) || !Number.isFinite(firstVal)) return v;
+    return (idle.rotation || 0) + (v - firstVal);
+  },
+  captureValueAt: (L) => Number.isFinite(L.rotation) ? L.rotation : 0,
+  isAtIdle: (L, idle) => {
+    const ir = Number.isFinite(idle.rotation) ? idle.rotation : 0;
+    const curR = Number.isFinite(L.rotation) ? L.rotation : 0;
+    return Math.abs(curR - ir) < 1e-9;
+  },
+  writeToRec: (L, rec) => {
+    const rot = L.rotation;
+    if (rot != null && rot !== 0) rec.rotation = rot;
+  },
+  ui: {
+    block: "transform",
+    label: "\u041F\u043E\u0432\u043E\u0440\u043E\u0442",
+    popupHotkey: "2",
+    popupOrder: 2,
+    propsPanel: {
+      fields: [
+        { id: "kfRot", label: "\u0423\u0433\u043E\u043B (\xB0)", step: 1 }
+      ],
+      read: (v) => [String(Number.isFinite(v) ? Math.round(v * 100) / 100 : 0)],
+      write: ([raw]) => {
+        const v = parseFloat(raw || "");
+        return Number.isFinite(v) ? v : null;
+      }
+    }
+  },
+  appliesTo: null,
+  cascadesToChildren: false
+};
+var scaleChannel = {
+  name: "scale",
+  type: "vec2",
+  kind: "transform",
+  interpolated: true,
+  defaultValue: { x: 1, y: 1 },
+  idleFields: ["w", "h", "scaleX", "scaleY", "skewX"],
+  // Scale-канал — RATIO к idle.w/idle.h. Read учитывает И raw resize (L.w/h),
+  // И уже-применённый CSS scale (L.scaleX/Y). После bakeParentResize (parent с
+  // children) L.w == idle.w, ratio зашит в L.scaleX/Y — считаем композицию:
+  // ratio = (L.w * L.scaleX) / idle.w.
+  read: (L, idle) => {
+    if (idle && Number.isFinite(idle.w) && idle.w > 0 && Number.isFinite(idle.h) && idle.h > 0) {
+      const curW = Number.isFinite(L.w) ? L.w : idle.w;
+      const curH = Number.isFinite(L.h) ? L.h : idle.h;
+      const sx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
+      const sy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
+      return { x: curW * sx / idle.w, y: curH * sy / idle.h };
+    }
+    return { x: 1, y: 1 };
+  },
+  // Identity ratio (не idle.w/idle.h — это raw size, не ratio).
+  readIdle: () => ({ x: 1, y: 1 }),
+  write: (L, v, idle) => {
+    const ratio = toScaleObj(v);
+    if (idle && Number.isFinite(idle.w) && idle.w > 0) L.w = idle.w;
+    if (idle && Number.isFinite(idle.h) && idle.h > 0) L.h = idle.h;
+    if (Math.abs(ratio.x - 1) < 1e-9) delete L.scaleX;
+    else L.scaleX = ratio.x;
+    if (Math.abs(ratio.y - 1) < 1e-9) delete L.scaleY;
+    else L.scaleY = ratio.y;
+  },
+  // ANIM-OFFKEY-EDITS: scaleX/scaleY/skewX — internal helper editor'а (cascade
+  // повёрнутого parent, baked text/hint в multi-resize). Хранение в idle —
+  // ради корректного restore при close animDock.
+  snapshotIdleFields: (L, idle) => {
+    const sUniform = Number.isFinite(L.scale) ? L.scale : 1;
+    idle.w = Number.isFinite(L.w) ? L.w : 0;
+    idle.h = Number.isFinite(L.h) ? L.h : 0;
+    idle.scaleX = Number.isFinite(L.scaleX) ? L.scaleX : sUniform;
+    idle.scaleY = Number.isFinite(L.scaleY) ? L.scaleY : sUniform;
+    idle.skewX = Number.isFinite(L.skewX) ? L.skewX : 0;
+  },
+  restoreIdleFields: (L, idle) => {
+    if (Number.isFinite(idle.w) && idle.w > 0) L.w = idle.w;
+    if (Number.isFinite(idle.h) && idle.h > 0) L.h = idle.h;
+    if (Number.isFinite(idle.scaleX) && Math.abs(idle.scaleX - 1) > 1e-9) L.scaleX = idle.scaleX;
+    else delete L.scaleX;
+    if (Number.isFinite(idle.scaleY) && Math.abs(idle.scaleY - 1) > 1e-9) L.scaleY = idle.scaleY;
+    else delete L.scaleY;
+    if (Number.isFinite(idle.skewX) && Math.abs(idle.skewX) > 1e-9) L.skewX = idle.skewX;
+    else delete L.skewX;
+  },
+  lerp: (a, b, k) => {
+    const A = toScaleObj(a), B = toScaleObj(b);
+    return vec2Lerp(A, B, k);
+  },
+  blendAdd: (v, _idle, firstVal) => {
+    const V = toScaleObj(v), F = toScaleObj(firstVal);
+    return {
+      x: F.x !== 0 ? V.x / F.x : V.x,
+      y: F.y !== 0 ? V.y / F.y : V.y
+    };
+  },
+  captureValueAt: (L, idle) => {
+    if (idle && Number.isFinite(idle.w) && idle.w > 0 && Number.isFinite(idle.h) && idle.h > 0) {
+      const curW = Number.isFinite(L.w) ? L.w : idle.w;
+      const curH = Number.isFinite(L.h) ? L.h : idle.h;
+      const sx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
+      const sy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
+      return { x: curW * sx / idle.w, y: curH * sy / idle.h };
+    }
+    return { x: 1, y: 1 };
+  },
+  isAtIdle: (L, idle) => {
+    const iw = Number.isFinite(idle.w) ? idle.w : L.w;
+    const ih = Number.isFinite(idle.h) ? idle.h : L.h;
+    const isx = Number.isFinite(idle.scaleX) ? idle.scaleX : 1;
+    const isy = Number.isFinite(idle.scaleY) ? idle.scaleY : 1;
+    const isk = Number.isFinite(idle.skewX) ? idle.skewX : 0;
+    const curSx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
+    const curSy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
+    const curSk = Number.isFinite(L.skewX) ? L.skewX : 0;
+    return L.w === iw && L.h === ih && Math.abs(curSx - isx) < 1e-9 && Math.abs(curSy - isy) < 1e-9 && Math.abs(curSk - isk) < 1e-9;
+  },
+  writeToRec: (L, rec, { dims, sc }) => {
+    const lsx = sc ? sc.sx : L.scaleX;
+    const lsy = sc ? sc.sy : L.scaleY;
+    rec.w = dims.w;
+    rec.h = dims.h;
+    const skBase = L.skewX;
+    if (Number.isFinite(lsx) && lsx !== 1) rec.scaleX = lsx;
+    else delete rec.scaleX;
+    if (Number.isFinite(lsy) && lsy !== 1) rec.scaleY = lsy;
+    else delete rec.scaleY;
+    if (Number.isFinite(skBase) && skBase !== 0) rec.skewX = skBase;
+  },
+  ui: {
+    block: "scale",
+    label: "\u041C\u0430\u0441\u0448\u0442\u0430\u0431",
+    popupHotkey: "3",
+    popupOrder: 3,
+    propsPanel: {
+      fields: [
+        { id: "kfScaleX", label: "X", step: 0.05, min: 0 },
+        { id: "kfScaleY", label: "Y", step: 0.05, min: 0 }
+      ],
+      read: (v) => {
+        const obj = toScaleObj(v);
+        const round3 = (x) => Math.round(x * 1e3) / 1e3;
+        return [String(round3(obj.x ?? 1)), String(round3(obj.y ?? 1))];
+      },
+      write: ([xRaw, yRaw]) => {
+        const x = parseFloat(xRaw || "");
+        const y = parseFloat(yRaw || "");
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+      }
+    }
+  },
+  appliesTo: null,
+  cascadesToChildren: true
+};
+var opacityChannel = {
+  name: "opacity",
+  type: "number",
+  kind: "transform",
+  interpolated: true,
+  defaultValue: 1,
+  idleFields: ["opacity"],
+  read: (L) => Number.isFinite(L.opacity) ? L.opacity : 1,
+  readIdle: (idle) => idle ? idle.opacity ?? 1 : null,
+  write: (L, v) => {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      L.opacity = Math.max(0, Math.min(1, v));
+    }
+  },
+  snapshotIdleFields: (L, idle) => {
+    idle.opacity = Number.isFinite(L.opacity) ? L.opacity : 1;
+  },
+  restoreIdleFields: (L, idle) => {
+    if (idle.opacity !== 1) L.opacity = idle.opacity;
+    else delete L.opacity;
+  },
+  lerp: numberLerp,
+  blendAdd: (v, idle, firstVal) => {
+    if (typeof v !== "number" || typeof firstVal !== "number" || !Number.isFinite(v) || !Number.isFinite(firstVal)) return v;
+    return (idle.opacity ?? 1) + (v - firstVal);
+  },
+  captureValueAt: (L) => Number.isFinite(L.opacity) ? L.opacity : 1,
+  isAtIdle: (L, idle) => {
+    const io = Number.isFinite(idle.opacity) ? idle.opacity : 1;
+    const curO = Number.isFinite(L.opacity) ? L.opacity : 1;
+    return Math.abs(curO - io) < 1e-9;
+  },
+  writeToRec: (L, rec) => {
+    const op = L.opacity;
+    if (op != null && op !== 1) rec.opacity = op;
+  },
+  ui: {
+    block: "transform",
+    label: "\u041F\u0440\u043E\u0437\u0440\u0430\u0447\u043D\u043E\u0441\u0442\u044C",
+    popupHotkey: "4",
+    popupOrder: 4,
+    propsPanel: {
+      fields: [
+        { id: "kfOpacity", label: "\u041F\u0440\u043E\u0437\u0440\u0430\u0447\u043D\u043E\u0441\u0442\u044C (%)", step: 1, min: 0, max: 100 }
+      ],
+      read: (v) => [String(Math.round((Number.isFinite(v) ? v : 1) * 100))],
+      write: ([raw]) => {
+        const pct = parseFloat(raw || "");
+        if (!Number.isFinite(pct)) return null;
+        return Math.max(0, Math.min(1, pct / 100));
+      }
+    }
+  },
+  appliesTo: null,
+  cascadesToChildren: false
+};
+var triggerChannel = {
+  name: "trigger",
+  type: "discrete",
+  kind: "media-trigger",
+  interpolated: false,
+  defaultValue: { kind: "play" },
+  idleFields: [],
+  read: () => null,
+  readIdle: () => null,
+  write: () => {
+  },
+  snapshotIdleFields: () => {
+  },
+  restoreIdleFields: () => {
+  },
+  lerp: null,
+  blendAdd: (v) => v,
+  captureValueAt: () => ({ kind: "play" }),
+  isAtIdle: () => true,
+  // trigger — discrete event channel, keyframes хранятся отдельно в
+  // Action.tracks[].keyframes; на Layer-record ничего писать не нужно.
+  writeToRec: () => {
+  },
+  ui: {
+    block: null,
+    label: "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
+    popupHotkey: null,
+    popupOrder: 5,
+    propsPanel: null
+  },
+  appliesTo: null,
+  cascadesToChildren: false
+};
+var CHANNELS = [
+  positionChannel,
+  rotationChannel,
+  scaleChannel,
+  opacityChannel,
+  triggerChannel
+];
+var CHANNELS_BY_NAME = new Map(CHANNELS.map((c) => [c.name, c]));
 function getChannel(name) {
   const ch = CHANNELS_BY_NAME.get(name);
   if (!ch) throw new Error(`Unknown channel: ${name}`);
@@ -41,350 +374,13 @@ function getChannelsForBlock(block) {
 function getInterpolatedChannels() {
   return CHANNELS.filter((c) => c.interpolated);
 }
-var positionChannel, rotationChannel, scaleChannel, opacityChannel, triggerChannel, CHANNELS, CHANNELS_BY_NAME;
-var init_channelRegistry = __esm({
-  "js/anim-runtime/channelRegistry.js"() {
-    positionChannel = {
-      name: "position",
-      type: "vec2",
-      kind: "transform",
-      interpolated: true,
-      defaultValue: { x: 0, y: 0 },
-      idleFields: ["x", "y"],
-      read: (L) => ({ x: Number(L.x) || 0, y: Number(L.y) || 0 }),
-      readIdle: (idle) => idle ? { x: idle.x, y: idle.y } : null,
-      write: (L, v) => {
-        if (v && typeof v === "object" && Number.isFinite(v.x)) L.x = v.x;
-        if (v && typeof v === "object" && Number.isFinite(v.y)) L.y = v.y;
-      },
-      snapshotIdleFields: (L, idle) => {
-        idle.x = Number(L.x) || 0;
-        idle.y = Number(L.y) || 0;
-      },
-      restoreIdleFields: (L, idle) => {
-        L.x = idle.x;
-        L.y = idle.y;
-      },
-      lerp: vec2Lerp,
-      blendAdd: (v, idle, firstVal) => {
-        if (!v || !firstVal || typeof v !== "object" || typeof firstVal !== "object") return v;
-        return {
-          x: (idle.x || 0) + ((v.x || 0) - (firstVal.x || 0)),
-          y: (idle.y || 0) + ((v.y || 0) - (firstVal.y || 0))
-        };
-      },
-      captureValueAt: (L) => ({ x: Number(L.x) || 0, y: Number(L.y) || 0 }),
-      isAtIdle: (L, idle) => {
-        const ix = Number.isFinite(idle.x) ? idle.x : 0;
-        const iy = Number.isFinite(idle.y) ? idle.y : 0;
-        return (L.x || 0) === ix && (L.y || 0) === iy;
-      },
-      writeToRec: (L, rec, { num: num2 }) => {
-        rec.x = num2(L.x);
-        rec.y = num2(L.y);
-      },
-      ui: {
-        block: "transform",
-        label: "\u041F\u043E\u0437\u0438\u0446\u0438\u044F",
-        popupHotkey: "1",
-        popupOrder: 1,
-        propsPanel: {
-          fields: [
-            { id: "kfPosX", label: "X", step: 1 },
-            { id: "kfPosY", label: "Y", step: 1 }
-          ],
-          read: (v) => [
-            String(Math.round(v?.x ?? 0)),
-            String(Math.round(v?.y ?? 0))
-          ],
-          write: ([xRaw, yRaw]) => {
-            const x = parseFloat(xRaw || "");
-            const y = parseFloat(yRaw || "");
-            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-            return { x, y };
-          }
-        }
-      },
-      appliesTo: null,
-      cascadesToChildren: false
-    };
-    rotationChannel = {
-      name: "rotation",
-      type: "number",
-      kind: "transform",
-      interpolated: true,
-      defaultValue: 0,
-      idleFields: ["rotation"],
-      read: (L) => Number.isFinite(L.rotation) ? L.rotation : 0,
-      readIdle: (idle) => idle ? idle.rotation ?? 0 : null,
-      write: (L, v) => {
-        if (typeof v === "number" && Number.isFinite(v)) L.rotation = v;
-      },
-      snapshotIdleFields: (L, idle) => {
-        idle.rotation = Number.isFinite(L.rotation) ? L.rotation : 0;
-      },
-      restoreIdleFields: (L, idle) => {
-        if (idle.rotation !== 0) L.rotation = idle.rotation;
-        else delete L.rotation;
-      },
-      lerp: numberLerp,
-      blendAdd: (v, idle, firstVal) => {
-        if (typeof v !== "number" || typeof firstVal !== "number" || !Number.isFinite(v) || !Number.isFinite(firstVal)) return v;
-        return (idle.rotation || 0) + (v - firstVal);
-      },
-      captureValueAt: (L) => Number.isFinite(L.rotation) ? L.rotation : 0,
-      isAtIdle: (L, idle) => {
-        const ir = Number.isFinite(idle.rotation) ? idle.rotation : 0;
-        const curR = Number.isFinite(L.rotation) ? L.rotation : 0;
-        return Math.abs(curR - ir) < 1e-9;
-      },
-      writeToRec: (L, rec) => {
-        const rot = L.rotation;
-        if (rot != null && rot !== 0) rec.rotation = rot;
-      },
-      ui: {
-        block: "transform",
-        label: "\u041F\u043E\u0432\u043E\u0440\u043E\u0442",
-        popupHotkey: "2",
-        popupOrder: 2,
-        propsPanel: {
-          fields: [
-            { id: "kfRot", label: "\u0423\u0433\u043E\u043B (\xB0)", step: 1 }
-          ],
-          read: (v) => [String(Number.isFinite(v) ? Math.round(v * 100) / 100 : 0)],
-          write: ([raw]) => {
-            const v = parseFloat(raw || "");
-            return Number.isFinite(v) ? v : null;
-          }
-        }
-      },
-      appliesTo: null,
-      cascadesToChildren: false
-    };
-    scaleChannel = {
-      name: "scale",
-      type: "vec2",
-      kind: "transform",
-      interpolated: true,
-      defaultValue: { x: 1, y: 1 },
-      idleFields: ["w", "h", "scaleX", "scaleY", "skewX"],
-      // Scale-канал — RATIO к idle.w/idle.h. Read учитывает И raw resize (L.w/h),
-      // И уже-применённый CSS scale (L.scaleX/Y). После bakeParentResize (parent с
-      // children) L.w == idle.w, ratio зашит в L.scaleX/Y — считаем композицию:
-      // ratio = (L.w * L.scaleX) / idle.w.
-      read: (L, idle) => {
-        if (idle && Number.isFinite(idle.w) && idle.w > 0 && Number.isFinite(idle.h) && idle.h > 0) {
-          const curW = Number.isFinite(L.w) ? L.w : idle.w;
-          const curH = Number.isFinite(L.h) ? L.h : idle.h;
-          const sx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
-          const sy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
-          return { x: curW * sx / idle.w, y: curH * sy / idle.h };
-        }
-        return { x: 1, y: 1 };
-      },
-      // Identity ratio (не idle.w/idle.h — это raw size, не ratio).
-      readIdle: () => ({ x: 1, y: 1 }),
-      write: (L, v, idle) => {
-        const ratio = toScaleObj(v);
-        if (idle && Number.isFinite(idle.w) && idle.w > 0) L.w = idle.w;
-        if (idle && Number.isFinite(idle.h) && idle.h > 0) L.h = idle.h;
-        if (Math.abs(ratio.x - 1) < 1e-9) delete L.scaleX;
-        else L.scaleX = ratio.x;
-        if (Math.abs(ratio.y - 1) < 1e-9) delete L.scaleY;
-        else L.scaleY = ratio.y;
-      },
-      // ANIM-OFFKEY-EDITS: scaleX/scaleY/skewX — internal helper editor'а (cascade
-      // повёрнутого parent, baked text/hint в multi-resize). Хранение в idle —
-      // ради корректного restore при close animDock.
-      snapshotIdleFields: (L, idle) => {
-        const sUniform = Number.isFinite(L.scale) ? L.scale : 1;
-        idle.w = Number.isFinite(L.w) ? L.w : 0;
-        idle.h = Number.isFinite(L.h) ? L.h : 0;
-        idle.scaleX = Number.isFinite(L.scaleX) ? L.scaleX : sUniform;
-        idle.scaleY = Number.isFinite(L.scaleY) ? L.scaleY : sUniform;
-        idle.skewX = Number.isFinite(L.skewX) ? L.skewX : 0;
-      },
-      restoreIdleFields: (L, idle) => {
-        if (Number.isFinite(idle.w) && idle.w > 0) L.w = idle.w;
-        if (Number.isFinite(idle.h) && idle.h > 0) L.h = idle.h;
-        if (Number.isFinite(idle.scaleX) && Math.abs(idle.scaleX - 1) > 1e-9) L.scaleX = idle.scaleX;
-        else delete L.scaleX;
-        if (Number.isFinite(idle.scaleY) && Math.abs(idle.scaleY - 1) > 1e-9) L.scaleY = idle.scaleY;
-        else delete L.scaleY;
-        if (Number.isFinite(idle.skewX) && Math.abs(idle.skewX) > 1e-9) L.skewX = idle.skewX;
-        else delete L.skewX;
-      },
-      lerp: (a, b, k) => {
-        const A = toScaleObj(a), B = toScaleObj(b);
-        return vec2Lerp(A, B, k);
-      },
-      blendAdd: (v, _idle, firstVal) => {
-        const V = toScaleObj(v), F = toScaleObj(firstVal);
-        return {
-          x: F.x !== 0 ? V.x / F.x : V.x,
-          y: F.y !== 0 ? V.y / F.y : V.y
-        };
-      },
-      captureValueAt: (L, idle) => {
-        if (idle && Number.isFinite(idle.w) && idle.w > 0 && Number.isFinite(idle.h) && idle.h > 0) {
-          const curW = Number.isFinite(L.w) ? L.w : idle.w;
-          const curH = Number.isFinite(L.h) ? L.h : idle.h;
-          const sx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
-          const sy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
-          return { x: curW * sx / idle.w, y: curH * sy / idle.h };
-        }
-        return { x: 1, y: 1 };
-      },
-      isAtIdle: (L, idle) => {
-        const iw = Number.isFinite(idle.w) ? idle.w : L.w;
-        const ih = Number.isFinite(idle.h) ? idle.h : L.h;
-        const isx = Number.isFinite(idle.scaleX) ? idle.scaleX : 1;
-        const isy = Number.isFinite(idle.scaleY) ? idle.scaleY : 1;
-        const isk = Number.isFinite(idle.skewX) ? idle.skewX : 0;
-        const curSx = Number.isFinite(L.scaleX) ? L.scaleX : 1;
-        const curSy = Number.isFinite(L.scaleY) ? L.scaleY : 1;
-        const curSk = Number.isFinite(L.skewX) ? L.skewX : 0;
-        return L.w === iw && L.h === ih && Math.abs(curSx - isx) < 1e-9 && Math.abs(curSy - isy) < 1e-9 && Math.abs(curSk - isk) < 1e-9;
-      },
-      writeToRec: (L, rec, { dims, sc }) => {
-        const lsx = sc ? sc.sx : L.scaleX;
-        const lsy = sc ? sc.sy : L.scaleY;
-        rec.w = dims.w;
-        rec.h = dims.h;
-        const skBase = L.skewX;
-        if (Number.isFinite(lsx) && lsx !== 1) rec.scaleX = lsx;
-        else delete rec.scaleX;
-        if (Number.isFinite(lsy) && lsy !== 1) rec.scaleY = lsy;
-        else delete rec.scaleY;
-        if (Number.isFinite(skBase) && skBase !== 0) rec.skewX = skBase;
-      },
-      ui: {
-        block: "scale",
-        label: "\u041C\u0430\u0441\u0448\u0442\u0430\u0431",
-        popupHotkey: "3",
-        popupOrder: 3,
-        propsPanel: {
-          fields: [
-            { id: "kfScaleX", label: "X", step: 0.05, min: 0 },
-            { id: "kfScaleY", label: "Y", step: 0.05, min: 0 }
-          ],
-          read: (v) => {
-            const obj = toScaleObj(v);
-            const round3 = (x) => Math.round(x * 1e3) / 1e3;
-            return [String(round3(obj.x ?? 1)), String(round3(obj.y ?? 1))];
-          },
-          write: ([xRaw, yRaw]) => {
-            const x = parseFloat(xRaw || "");
-            const y = parseFloat(yRaw || "");
-            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-            return { x, y };
-          }
-        }
-      },
-      appliesTo: null,
-      cascadesToChildren: true
-    };
-    opacityChannel = {
-      name: "opacity",
-      type: "number",
-      kind: "transform",
-      interpolated: true,
-      defaultValue: 1,
-      idleFields: ["opacity"],
-      read: (L) => Number.isFinite(L.opacity) ? L.opacity : 1,
-      readIdle: (idle) => idle ? idle.opacity ?? 1 : null,
-      write: (L, v) => {
-        if (typeof v === "number" && Number.isFinite(v)) {
-          L.opacity = Math.max(0, Math.min(1, v));
-        }
-      },
-      snapshotIdleFields: (L, idle) => {
-        idle.opacity = Number.isFinite(L.opacity) ? L.opacity : 1;
-      },
-      restoreIdleFields: (L, idle) => {
-        if (idle.opacity !== 1) L.opacity = idle.opacity;
-        else delete L.opacity;
-      },
-      lerp: numberLerp,
-      blendAdd: (v, idle, firstVal) => {
-        if (typeof v !== "number" || typeof firstVal !== "number" || !Number.isFinite(v) || !Number.isFinite(firstVal)) return v;
-        return (idle.opacity ?? 1) + (v - firstVal);
-      },
-      captureValueAt: (L) => Number.isFinite(L.opacity) ? L.opacity : 1,
-      isAtIdle: (L, idle) => {
-        const io = Number.isFinite(idle.opacity) ? idle.opacity : 1;
-        const curO = Number.isFinite(L.opacity) ? L.opacity : 1;
-        return Math.abs(curO - io) < 1e-9;
-      },
-      writeToRec: (L, rec) => {
-        const op = L.opacity;
-        if (op != null && op !== 1) rec.opacity = op;
-      },
-      ui: {
-        block: "transform",
-        label: "\u041F\u0440\u043E\u0437\u0440\u0430\u0447\u043D\u043E\u0441\u0442\u044C",
-        popupHotkey: "4",
-        popupOrder: 4,
-        propsPanel: {
-          fields: [
-            { id: "kfOpacity", label: "\u041F\u0440\u043E\u0437\u0440\u0430\u0447\u043D\u043E\u0441\u0442\u044C (%)", step: 1, min: 0, max: 100 }
-          ],
-          read: (v) => [String(Math.round((Number.isFinite(v) ? v : 1) * 100))],
-          write: ([raw]) => {
-            const pct = parseFloat(raw || "");
-            if (!Number.isFinite(pct)) return null;
-            return Math.max(0, Math.min(1, pct / 100));
-          }
-        }
-      },
-      appliesTo: null,
-      cascadesToChildren: false
-    };
-    triggerChannel = {
-      name: "trigger",
-      type: "discrete",
-      kind: "media-trigger",
-      interpolated: false,
-      defaultValue: { kind: "play" },
-      idleFields: [],
-      read: () => null,
-      readIdle: () => null,
-      write: () => {
-      },
-      snapshotIdleFields: () => {
-      },
-      restoreIdleFields: () => {
-      },
-      lerp: null,
-      blendAdd: (v) => v,
-      captureValueAt: () => ({ kind: "play" }),
-      isAtIdle: () => true,
-      // trigger — discrete event channel, keyframes хранятся отдельно в
-      // Action.tracks[].keyframes; на Layer-record ничего писать не нужно.
-      writeToRec: () => {
-      },
-      ui: {
-        block: null,
-        label: "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
-        popupHotkey: null,
-        popupOrder: 5,
-        propsPanel: null
-      },
-      appliesTo: null,
-      cascadesToChildren: false
-    };
-    CHANNELS = [
-      positionChannel,
-      rotationChannel,
-      scaleChannel,
-      opacityChannel,
-      triggerChannel
-    ];
-    CHANNELS_BY_NAME = new Map(CHANNELS.map((c) => [c.name, c]));
-  }
-});
 
 // js/anim-runtime/sampler.js
+var EASINGS = {
+  linear: (t) => t,
+  smooth: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+  step: (_t) => 0
+};
 function cloneVal(v) {
   if (v && typeof v === "object") return { ...v };
   return v;
@@ -431,17 +427,6 @@ function applyChannelValueTo(L, channelName, v, idle) {
   if (!channel) return;
   channel.write(L, v, idle);
 }
-var EASINGS;
-var init_sampler = __esm({
-  "js/anim-runtime/sampler.js"() {
-    init_channelRegistry();
-    EASINGS = {
-      linear: (t) => t,
-      smooth: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-      step: (_t) => 0
-    };
-  }
-});
 
 // js/anim-runtime/transformMath.js
 function matIdentity() {
@@ -623,22 +608,18 @@ function applyCascadeToLayer(L, snapshot, result) {
   if (Math.abs(result.scaleH - 1) < 1e-9) delete L.scaleY;
   else L.scaleY = Math.round(result.scaleH * 1e4) / 1e4;
 }
-var init_transformMath = __esm({
-  "js/anim-runtime/transformMath.js"() {
-  }
-});
 
 // js/anim-runtime/interpolator.js
 function createInterpolator(deps) {
   const {
-    getAction: getAction2,
-    getLayerById: getLayerById2,
+    getAction,
+    getLayerById,
     getLayers: getLayers2,
     getDescendantIds: getDescendantIds2,
     dispatchBatched: dispatchBatched2 = () => {
     }
   } = deps || {};
-  if (typeof getAction2 !== "function" || typeof getLayerById2 !== "function" || typeof getLayers2 !== "function" || typeof getDescendantIds2 !== "function") {
+  if (typeof getAction !== "function" || typeof getLayerById !== "function" || typeof getLayers2 !== "function" || typeof getDescendantIds2 !== "function") {
     throw new Error("createInterpolator: deps must include getAction, getLayerById, getLayers, getDescendantIds");
   }
   function _snapshotLayerEditorState(L) {
@@ -656,7 +637,7 @@ function createInterpolator(deps) {
   let _runIdN = 0;
   function snapshotEditorState(actionId) {
     _editorState = /* @__PURE__ */ new Map();
-    const a = getAction2(actionId);
+    const a = getAction(actionId);
     if (!a) return;
     for (const L of getLayers2()) {
       if (!L || !L.id) continue;
@@ -668,7 +649,7 @@ function createInterpolator(deps) {
   }
   function ensureEditorStateForLayer(layerId) {
     if (!_editorState || !layerId || _editorState.has(layerId)) return;
-    const L = getLayerById2(layerId);
+    const L = getLayerById(layerId);
     if (!L) return;
     _editorState.set(layerId, _snapshotLayerEditorState(L));
   }
@@ -680,7 +661,7 @@ function createInterpolator(deps) {
   function restoreEditorState() {
     if (!_editorState) return;
     for (const [layerId, snap] of _editorState.entries()) {
-      const L = getLayerById2(layerId);
+      const L = getLayerById(layerId);
       if (!L) continue;
       _restoreLayerToEditorState(L, snap);
     }
@@ -689,7 +670,7 @@ function createInterpolator(deps) {
   }
   function applyInterpolation(actionId, currentTime, opts = {}) {
     if (!_editorState) return;
-    const a = getAction2(actionId);
+    const a = getAction(actionId);
     if (!a) return;
     const t = Math.max(0, Number.isFinite(currentTime) ? currentTime : 0);
     const extrapolation = opts.extrapolation === "nothing" ? "nothing" : "hold";
@@ -705,7 +686,7 @@ function createInterpolator(deps) {
         if (cur && cur.priority > priority && cur.runId !== runId) continue;
         _priorityLock.set(trk.layerId, { priority, runId });
       }
-      const L = getLayerById2(trk.layerId);
+      const L = getLayerById(trk.layerId);
       if (!L) continue;
       const snap = _editorState.get(trk.layerId);
       if (!snap) continue;
@@ -715,7 +696,7 @@ function createInterpolator(deps) {
       applyChannelValueTo(L, trk.channel, final, snap);
       if (channel.cascadesToChildren) {
         for (const dId of getDescendantIds2(trk.layerId)) {
-          const dL = getLayerById2(dId);
+          const dL = getLayerById(dId);
           const dSnap = _editorState.get(dId);
           if (dL && dSnap) _restoreLayerToEditorState(dL, dSnap);
         }
@@ -725,7 +706,7 @@ function createInterpolator(deps) {
       for (const layerId of Object.keys(a.overrides.byLayerId)) {
         const layerMap = a.overrides.byLayerId[layerId];
         if (!layerMap) continue;
-        const L = getLayerById2(layerId);
+        const L = getLayerById(layerId);
         if (!L) continue;
         const snap = _editorState.get(layerId);
         if (!snap) continue;
@@ -750,7 +731,7 @@ function createInterpolator(deps) {
           );
           if (channel.cascadesToChildren) {
             for (const dId of getDescendantIds2(layerId)) {
-              const dL = getLayerById2(dId);
+              const dL = getLayerById(dId);
               const dSnap = _editorState.get(dId);
               if (dL && dSnap) _restoreLayerToEditorState(dL, dSnap);
             }
@@ -768,7 +749,7 @@ function createInterpolator(deps) {
     return null;
   }
   function playActionRun(actionId, opts = {}) {
-    const actionMaybe = getAction2(actionId);
+    const actionMaybe = getAction(actionId);
     if (!actionMaybe) {
       try {
         opts.onDone?.();
@@ -781,7 +762,7 @@ function createInterpolator(deps) {
     if (!_editorState) _editorState = /* @__PURE__ */ new Map();
     for (const t of action.tracks || []) {
       if (!t.layerId || _editorState.has(t.layerId)) continue;
-      const L = getLayerById2(t.layerId);
+      const L = getLayerById(t.layerId);
       if (!L) continue;
       _editorState.set(t.layerId, _snapshotLayerEditorState(L));
     }
@@ -839,7 +820,7 @@ function createInterpolator(deps) {
           const key = `${trk.id}:${i}`;
           if (_firedTriggers.has(key)) continue;
           _firedTriggers.add(key);
-          const L = getLayerById2(trk.layerId);
+          const L = getLayerById(trk.layerId);
           if (!L) continue;
           const kind = kf.value && kf.value.kind ? kf.value.kind : "play";
           if (kind === "play") L.playing = true;
@@ -930,12 +911,6 @@ function createInterpolator(deps) {
     _resetEditorState
   };
 }
-var init_interpolator = __esm({
-  "js/anim-runtime/interpolator.js"() {
-    init_sampler();
-    init_channelRegistry();
-  }
-});
 
 // js/anim-runtime/resolution.js
 function _cloneValue(v) {
@@ -963,23 +938,6 @@ function resolveChannelValue(action, L, channelName, t, idle = null) {
   }
   return channel.read(L, idle);
 }
-var init_resolution = __esm({
-  "js/anim-runtime/resolution.js"() {
-    init_sampler();
-    init_channelRegistry();
-  }
-});
-
-// js/anim-runtime/index.js
-var init_anim_runtime = __esm({
-  "js/anim-runtime/index.js"() {
-    init_sampler();
-    init_transformMath();
-    init_interpolator();
-    init_channelRegistry();
-    init_resolution();
-  }
-});
 
 // js/event-graph/runtime.js
 function createRuntime() {
@@ -1083,41 +1041,16 @@ function createRuntime() {
     getTransitions
   };
 }
-var init_runtime = __esm({
-  "js/event-graph/runtime.js"() {
-  }
-});
 
 // js/event-graph/dock/model.js
-function setNodeRegistry(registry) {
-  _nodeRegistry = registry;
-}
-function layerSubtype(L) {
-  if (!L) return "\u2014";
-  if (L.type === "lottie") return "Lottie";
-  if (L.type === "png") return L.sprite && L.sprite.enabled ? "Sprite" : "PNG";
-  if (L.type === "video") {
-    return (L.mimeType || "").toLowerCase() === "image/gif" ? "GIF" : "\u0412\u0438\u0434\u0435\u043E";
-  }
-  if (L.type === "hint") return "\u0425\u0438\u043D\u0442";
-  if (L.type === "text") return "\u0422\u0435\u043A\u0441\u0442";
-  if (L.type === "interactive-animation") return "\u0418\u043D\u0442\u0435\u0440\u0430\u043A\u0442\u0438\u0432\u043D\u0430\u044F";
-  return L.type;
-}
-var NODE_EVENT, NODE_ANIMATION, NODE_LAYER, NODE_DELAY, NODE_ACTION, NODE_START, NODE_INTERACTIVE_ANIMATION, NODE_EMIT_EVENT, _nodeRegistry;
-var init_model = __esm({
-  "js/event-graph/dock/model.js"() {
-    NODE_EVENT = "event";
-    NODE_ANIMATION = "animation";
-    NODE_LAYER = "layer";
-    NODE_DELAY = "delay";
-    NODE_ACTION = "action";
-    NODE_START = "start";
-    NODE_INTERACTIVE_ANIMATION = "interactive-animation";
-    NODE_EMIT_EVENT = "emit-event";
-    _nodeRegistry = null;
-  }
-});
+var NODE_EVENT = "event";
+var NODE_ANIMATION = "animation";
+var NODE_LAYER = "layer";
+var NODE_DELAY = "delay";
+var NODE_ACTION = "action";
+var NODE_START = "start";
+var NODE_INTERACTIVE_ANIMATION = "interactive-animation";
+var NODE_EMIT_EVENT = "emit-event";
 
 // js/event-graph/compileNodes.js
 function flatChildren(childrenBySocket) {
@@ -1280,22 +1213,16 @@ function compileDelay(spec, childrenBySocket) {
     }, ms);
   };
 }
-var NODE_COMPILERS;
-var init_compileNodes = __esm({
-  "js/event-graph/compileNodes.js"() {
-    init_model();
-    NODE_COMPILERS = {
-      [NODE_EVENT]: compileEvent,
-      [NODE_START]: compileStart,
-      [NODE_ANIMATION]: compileAnimation,
-      [NODE_ACTION]: compileAction,
-      [NODE_LAYER]: compileLayer,
-      [NODE_INTERACTIVE_ANIMATION]: compileInteractiveAnimation,
-      [NODE_EMIT_EVENT]: compileEmitEvent,
-      [NODE_DELAY]: compileDelay
-    };
-  }
-});
+var NODE_COMPILERS = {
+  [NODE_EVENT]: compileEvent,
+  [NODE_START]: compileStart,
+  [NODE_ANIMATION]: compileAnimation,
+  [NODE_ACTION]: compileAction,
+  [NODE_LAYER]: compileLayer,
+  [NODE_INTERACTIVE_ANIMATION]: compileInteractiveAnimation,
+  [NODE_EMIT_EVENT]: compileEmitEvent,
+  [NODE_DELAY]: compileDelay
+};
 
 // js/event-graph/compileGraph.js
 function indexEdges(edges) {
@@ -1418,26 +1345,9 @@ function compileStarts(graph, api = {}) {
   }
   return starts;
 }
-var init_compileGraph = __esm({
-  "js/event-graph/compileGraph.js"() {
-    init_compileNodes();
-    init_model();
-  }
-});
-
-// js/event-graph/playController.js
-var init_playController = __esm({
-  "js/event-graph/playController.js"() {
-  }
-});
-
-// js/event-graph/hintPulse.js
-var init_hintPulse = __esm({
-  "js/event-graph/hintPulse.js"() {
-  }
-});
 
 // js/event-graph/layerCycleBus.js
+var listeners = /* @__PURE__ */ new Map();
 function addCycleListener(layerId, fn) {
   if (!layerId || typeof fn !== "function") return () => {
   };
@@ -1467,18 +1377,6 @@ function fireCycle(layerId) {
 function clearCycleListeners() {
   listeners.clear();
 }
-var listeners;
-var init_layerCycleBus = __esm({
-  "js/event-graph/layerCycleBus.js"() {
-    listeners = /* @__PURE__ */ new Map();
-  }
-});
-
-// js/core/eventBatch.js
-var init_eventBatch = __esm({
-  "js/core/eventBatch.js"() {
-  }
-});
 
 // js/core/editorContext.js
 function createEditorContext() {
@@ -1509,47 +1407,17 @@ function createEditorContext() {
     canvas: { w: 400, h: 400 }
   };
 }
+var _contextStack = [createEditorContext()];
+var _state = _contextStack[0];
 function getCurrentContext() {
   return _state;
 }
 function getRootContext() {
   return _contextStack[0];
 }
-function _readContextStack() {
-  return _contextStack.slice();
-}
-var _contextStack, _state;
-var init_editorContext = __esm({
-  "js/core/editorContext.js"() {
-    _contextStack = [createEditorContext()];
-    _state = _contextStack[0];
-  }
-});
-
-// js/core/layerBuilder.js
-var init_layerBuilder = __esm({
-  "js/core/layerBuilder.js"() {
-  }
-});
-
-// js/core/assetLibrary.js
-function _root() {
-  return getRootContext();
-}
-function getAsset(assetId) {
-  return _root()._assetLibrary.get(assetId) || null;
-}
-var init_assetLibrary = __esm({
-  "js/core/assetLibrary.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_fileManager();
-    init_layerBuilder();
-  }
-});
 
 // js/core/undoHistory.js
+var _innerHistoryChangeHooks = [];
 function _onInnerHistoryChange(fn) {
   _innerHistoryChangeHooks.push(fn);
 }
@@ -1564,90 +1432,11 @@ function _currentPersistKey() {
     return null;
   }
 }
-var _innerHistoryChangeHooks;
-var init_undoHistory = __esm({
-  "js/core/undoHistory.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_assetLibrary();
-    _innerHistoryChangeHooks = [];
-  }
-});
-
-// js/core/hierarchy.js
-var init_hierarchy = __esm({
-  "js/core/hierarchy.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_anim_runtime();
-  }
-});
-
-// js/core/fileManager.js
-var getAction;
-var init_fileManager = __esm({
-  "js/core/fileManager.js"() {
-    init_eventBatch();
-    init_hierarchy();
-    init_undoHistory();
-    init_editorContext();
-    getAction = (id) => _state._actions.get(id) || null;
-  }
-});
-
-// js/core/layerFactories.js
-var init_layerFactories = __esm({
-  "js/core/layerFactories.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_fileManager();
-    init_assetLibrary();
-    init_layerBuilder();
-  }
-});
-
-// js/core/alignment.js
-var init_alignment = __esm({
-  "js/core/alignment.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_fileManager();
-    init_hierarchy();
-  }
-});
-
-// js/core/duplication.js
-var init_duplication = __esm({
-  "js/core/duplication.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_fileManager();
-    init_hierarchy();
-  }
-});
-
-// js/core/actionQueries.js
-var init_actionQueries = __esm({
-  "js/core/actionQueries.js"() {
-    init_editorContext();
-  }
-});
-
-// js/core/actionOverrides.js
-var init_actionOverrides = __esm({
-  "js/core/actionOverrides.js"() {
-    init_editorContext();
-    init_eventBatch();
-    init_undoHistory();
-    init_anim_runtime();
-  }
-});
 
 // js/core/interactiveLayer.js
+var _iaHistoryByAsset = /* @__PURE__ */ new Map();
+var _iaPersistTimer = 0;
+var _iaSuppressPersistOnce = false;
 function _scheduleIaHistoryPersist() {
   if (typeof localStorage === "undefined") return;
   if (_iaSuppressPersistOnce) {
@@ -1676,6 +1465,16 @@ function _persistIaHistory() {
   } catch (_) {
   }
 }
+_onInnerHistoryChange(() => {
+  const ctx = getCurrentContext();
+  const aid = ctx._parentAssetId;
+  if (!aid) return;
+  _iaHistoryByAsset.set(aid, {
+    history: ctx._history.slice(),
+    future: ctx._future.slice()
+  });
+  _scheduleIaHistoryPersist();
+});
 function purgeStaleIaHistory() {
   if (_iaHistoryByAsset.size === 0) return;
   const alive = /* @__PURE__ */ new Set();
@@ -1691,53 +1490,11 @@ function purgeStaleIaHistory() {
   }
   if (changed) _scheduleIaHistoryPersist();
 }
-function isInsideInteractiveLayer() {
-  return !!getCurrentContext()._parentLayerId;
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+  document.addEventListener("layers-changed", purgeStaleIaHistory);
+  document.addEventListener("project-loaded", purgeStaleIaHistory);
+  document.addEventListener("assets-changed", purgeStaleIaHistory);
 }
-function getLayerByIdAnywhere(layerId) {
-  for (const ctx of _allContexts()) {
-    const L = ctx._layerById?.get(layerId);
-    if (L) return L;
-  }
-  return null;
-}
-function _allContexts() {
-  return _readContextStack();
-}
-var _iaHistoryByAsset, _iaPersistTimer, _iaSuppressPersistOnce;
-var init_interactiveLayer = __esm({
-  "js/core/interactiveLayer.js"() {
-    init_editorContext();
-    init_undoHistory();
-    init_eventBatch();
-    init_assetLibrary();
-    init_layerBuilder();
-    _iaHistoryByAsset = /* @__PURE__ */ new Map();
-    _iaPersistTimer = 0;
-    _iaSuppressPersistOnce = false;
-    _onInnerHistoryChange(() => {
-      const ctx = getCurrentContext();
-      const aid = ctx._parentAssetId;
-      if (!aid) return;
-      _iaHistoryByAsset.set(aid, {
-        history: ctx._history.slice(),
-        future: ctx._future.slice()
-      });
-      _scheduleIaHistoryPersist();
-    });
-    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
-      document.addEventListener("layers-changed", purgeStaleIaHistory);
-      document.addEventListener("project-loaded", purgeStaleIaHistory);
-      document.addEventListener("assets-changed", purgeStaleIaHistory);
-    }
-  }
-});
-
-// js/core/errorHandler.js
-var init_errorHandler = __esm({
-  "js/core/errorHandler.js"() {
-  }
-});
 
 // js/core/layerKinds.js
 function isSpritePng(L) {
@@ -1770,10 +1527,6 @@ function isScalable(L) {
 function isNull(L) {
   return !!(L && L.type === "null");
 }
-var init_layerKinds = __esm({
-  "js/core/layerKinds.js"() {
-  }
-});
 
 // js/core/projectUtils.js
 function escapeHTML(s) {
@@ -1789,6 +1542,7 @@ function makeCopyTitle(original, existingTitles) {
     n++;
   }
 }
+var num = (v) => typeof v === "number" && isFinite(v) ? v : 0;
 function parsePx(v) {
   if (v == null || v === "") return 0;
   const n = parseFloat(String(v).replace("px", ""));
@@ -1804,633 +1558,6 @@ function scaleOf(o) {
   const sy = [o.scaleY, o.sy, o.scale?.y, o.transform?.scaleY].find((v) => typeof v === "number" && isFinite(v));
   return { sx: typeof sx === "number" ? sx : 1, sy: typeof sy === "number" ? sy : 1 };
 }
-var num;
-var init_projectUtils = __esm({
-  "js/core/projectUtils.js"() {
-    num = (v) => typeof v === "number" && isFinite(v) ? v : 0;
-  }
-});
-
-// js/core/rafThrottle.js
-var init_rafThrottle = __esm({
-  "js/core/rafThrottle.js"() {
-  }
-});
-
-// js/core/zoom.js
-var init_zoom = __esm({
-  "js/core/zoom.js"() {
-  }
-});
-
-// js/core/utils.js
-var init_utils = __esm({
-  "js/core/utils.js"() {
-  }
-});
-
-// js/core/listeners.js
-var init_listeners = __esm({
-  "js/core/listeners.js"() {
-    init_eventBatch();
-    init_undoHistory();
-  }
-});
-
-// js/core/index.js
-var init_core = __esm({
-  "js/core/index.js"() {
-    init_fileManager();
-    init_undoHistory();
-    init_layerFactories();
-    init_alignment();
-    init_duplication();
-    init_hierarchy();
-    init_actionQueries();
-    init_actionOverrides();
-    init_interactiveLayer();
-    init_assetLibrary();
-    init_eventBatch();
-    init_errorHandler();
-    init_layerKinds();
-    init_projectUtils();
-    init_rafThrottle();
-    init_zoom();
-    init_utils();
-    init_listeners();
-  }
-});
-
-// js/ui/inputCommit.js
-var init_inputCommit = __esm({
-  "js/ui/inputCommit.js"() {
-  }
-});
-
-// js/event-graph/dock/nodes.js
-function _readIaTriggers(L) {
-  if (!L || L.type !== "interactive-animation") return [];
-  const rec = L.assetId ? getAsset(L.assetId) : null;
-  const payload = (
-    /** @type {import('../../core/index.js').IaPayload | null} */
-    rec && rec.kind === "ia" ? rec.payload : null
-  );
-  if (payload && Array.isArray(payload.triggers)) return payload.triggers.slice();
-  return [];
-}
-function viewModelWithLayer(id, spec, { layerById }, { typeLabel }) {
-  const L = spec.layerId ? layerById.get(spec.layerId) : null;
-  return {
-    id,
-    kind: spec.kind,
-    layerId: spec.layerId || null,
-    label: L ? L.name || L.id : "\u2014 \u0441\u043B\u043E\u0439 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D",
-    subtype: L ? layerSubtype(L) : "\u2014",
-    typeLabel
-  };
-}
-var NODE_ICONS, NODE_TYPES, KIND_DOT_COLOR;
-var init_nodes = __esm({
-  "js/event-graph/dock/nodes.js"() {
-    init_model();
-    init_core();
-    init_inputCommit();
-    init_playController();
-    init_compileNodes();
-    NODE_ICONS = {
-      [NODE_EVENT]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2l6 7h-4l2 5L4 7h4z"/></svg>',
-      [NODE_ANIMATION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 8h10M11 5l3 3-3 3"/></svg>',
-      [NODE_DELAY]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2" stroke-linecap="round"/></svg>',
-      [NODE_LAYER]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l6 3-6 3-6-3 6-3zM2 8l6 3 6-3M2 11l6 3 6-3"/></svg>',
-      [NODE_ACTION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 8h2M11 8h2M5 4l3 4-3 4M11 4l-3 4 3 4"/></svg>',
-      [NODE_START]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3l8 5-8 5V3z"/></svg>',
-      // IA-NODE: тот же символ что у IA-слоя в layer-list (плоская рамка с
-      // линиями внутри — «контейнер с собственной анимацией»).
-      [NODE_INTERACTIVE_ANIMATION]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7h6M5 10h4" stroke-linecap="round"/></svg>',
-      // Emit-event (Stage 6): прямоугольник со стрелкой наружу — «событие
-      // вылетает из плеера наружу к разработчику ok.ru».
-      [NODE_EMIT_EVENT]: '<svg class="sm-node-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h7M7 5l3 3-3 3M11 3h2v10h-2"/></svg>'
-    };
-    NODE_TYPES = {
-      [NODE_EVENT]: {
-        typeLabel: "\u0421\u043E\u0431\u044B\u0442\u0438\u0435",
-        layoutColumn: 0,
-        sockets: [
-          { name: "onClick", dir: "output", dataType: "trigger", label: "\u041F\u0440\u0438 \u043A\u043B\u0438\u043A\u0435" }
-        ],
-        template: {
-          title: (n) => n.label,
-          // Hdr уже показывает «Событие» — чтобы не дублировать, subtitle даёт
-          // instance-специфичную часть. Для layer-source — тип слоя + «клик».
-          // Для trigger-source (MS3a) — слово «триггер».
-          subtitle: (n) => n.sourceType === "trigger" ? "\u0442\u0440\u0438\u0433\u0433\u0435\u0440" : (n.subtype || "\u2014") + " \xB7 \u043A\u043B\u0438\u043A"
-        },
-        defaults(deps) {
-          return {
-            kind: NODE_EVENT,
-            sourceType: "layer",
-            layerId: deps.firstEventSource()?.id || null
-          };
-        },
-        toViewModel(id, spec, deps) {
-          const sourceType = spec.sourceType || "layer";
-          if (sourceType === "trigger") {
-            const triggerName = typeof spec.triggerName === "string" ? spec.triggerName : "";
-            return {
-              id,
-              kind: spec.kind,
-              sourceType: "trigger",
-              triggerName,
-              label: triggerName ? "\u26A1 " + triggerName : "\u2014 \u0442\u0440\u0438\u0433\u0433\u0435\u0440 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D",
-              subtype: null,
-              typeLabel: "\u0421\u043E\u0431\u044B\u0442\u0438\u0435"
-            };
-          }
-          const vm = viewModelWithLayer(id, spec, deps, { typeLabel: "\u0421\u043E\u0431\u044B\u0442\u0438\u0435" });
-          vm.sourceType = "layer";
-          return vm;
-        },
-        propsFields: [
-          // IA-CIRCLE-3 MS3a (2026-05-13): переключатель источника.
-          // Виден ТОЛЬКО внутри IA-слоя (там есть L.triggers parent'а). В parent
-          // графе редактора превью sourceType всегда 'layer' — переключатель скрыт,
-          // чтобы не вводить дизайнера в заблуждение «откуда триггеры если их нет».
-          {
-            type: "select",
-            key: "sourceType",
-            label: "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A",
-            options: [
-              { value: "layer", label: "\u041A\u043B\u0438\u043A \u043D\u0430 \u0441\u043B\u043E\u0435" },
-              { value: "trigger", label: "\u0422\u0440\u0438\u0433\u0433\u0435\u0440 \u043F\u043E \u0438\u043C\u0435\u043D\u0438" }
-            ],
-            visibleWhen: () => isInsideInteractiveLayer()
-          },
-          // layerSelect: видим когда sourceType='layer' (default для legacy).
-          {
-            type: "layerSelect",
-            key: "layerId",
-            label: "\u0421\u043B\u043E\u0439-\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A",
-            filter: "eventSource",
-            visibleWhen: (n) => (n.sourceType || "layer") === "layer"
-          },
-          // triggerSelect (MS3a): динамический dropdown с именами из L.triggers
-          // parent IA-слоя. Видим когда sourceType='trigger' И внутри IA-слоя.
-          {
-            type: "triggerSelect",
-            key: "triggerName",
-            label: "\u0422\u0440\u0438\u0433\u0433\u0435\u0440",
-            visibleWhen: (n) => n.sourceType === "trigger" && isInsideInteractiveLayer()
-          }
-        ],
-        propsHint(n) {
-          if (n.sourceType === "trigger") {
-            return '\u0421\u0440\u0430\u0431\u0430\u0442\u044B\u0432\u0430\u0435\u0442 \u043A\u043E\u0433\u0434\u0430 \u0434\u0451\u0440\u0433\u0430\u044E\u0442 \u0442\u0440\u0438\u0433\u0433\u0435\u0440 \u0441 \u044D\u0442\u0438\u043C \u0438\u043C\u0435\u043D\u0435\u043C \u2014 \u0447\u0435\u0440\u0435\u0437 \u0442\u0435\u0441\u0442-\u043F\u0430\u043D\u0435\u043B\u044C \u0432 Play-mode \u0438\u043B\u0438 (\u0432 \u0431\u0443\u0434\u0443\u0449\u0435\u043C) `player.trigger("name")` \u0432 \u043F\u043B\u0435\u0435\u0440\u0435 ok.ru.';
-          }
-          return "\u041A\u043B\u0438\u043A \u043F\u043E \u044D\u0442\u043E\u043C\u0443 \u0441\u043B\u043E\u044E \u0432 Preview \u2192 \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0446\u0435\u043F\u043E\u0447\u043A\u0430.";
-        },
-        // Event — корень subgraph'а. Pure compile живёт в `event-graph/compileNodes.js`
-        // (Stage 5). compileEventGraph / compileTriggers фильтруют по sourceType
-        // на верхнем уровне; сам compile — pure, через NODE_COMPILERS.
-        compile: NODE_COMPILERS[NODE_EVENT]
-      },
-      [NODE_START]: {
-        typeLabel: "\u0421\u0442\u0430\u0440\u0442",
-        layoutColumn: 0,
-        sockets: [
-          // Только output — start не имеет триггер-входа. compileStarts
-          // в compileGraph.js отдельно собирает Start-ноды как entry points.
-          { name: "fire", dir: "output", dataType: "trigger", label: "\u0417\u0430\u043F\u0443\u0441\u043A" }
-        ],
-        template: {
-          title: () => "\u0421\u0442\u0430\u0440\u0442",
-          subtitle: () => "\u0430\u0432\u0442\u043E \u043F\u0440\u0438 Preview",
-          badge: () => null
-        },
-        defaults() {
-          return { kind: NODE_START };
-        },
-        toViewModel(id) {
-          return { id, kind: NODE_START, label: "\u0421\u0442\u0430\u0440\u0442" };
-        },
-        propsFields: [],
-        propsHint: "\u041F\u0440\u0438 \u0432\u0445\u043E\u0434\u0435 \u0432 Preview \u044D\u0442\u0430 \u043D\u043E\u0434\u0430 \u0444\u0430\u0439\u0440\u0438\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u2014 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u043E \u0414\u041E \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u043A\u0430\u0434\u0440\u0430. \u0423\u0434\u043E\u0431\u043D\u043E \u0447\u0442\u043E\u0431\u044B \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u0430\u0442\u044C \u0441 \u043A\u043E\u043D\u043A\u0440\u0435\u0442\u043D\u043E\u0433\u043E Action \u0438 \u043D\u0435 \xAB\u043C\u0435\u043B\u044C\u043A\u0430\u0442\u044C\xBB idle-\u0441\u0446\u0435\u043D\u043E\u0439.",
-        // Pure compile — `event-graph/compileNodes.js`.
-        compile: NODE_COMPILERS[NODE_START]
-      },
-      [NODE_ANIMATION]: {
-        typeLabel: "\u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F",
-        layoutColumn: 1,
-        sockets: [
-          // accepts: whitelist kind'ов откуда допустимо соединение. Без него
-          // generic isCompatibleEdge разрешит event→layer, animation→animation
-          // и прочие пары, которые runtime не умеет развернуть в transitions.
-          { name: "trigger", dir: "input", dataType: "trigger", labelVisible: true, accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION], label: "\u0422\u0440\u0438\u0433\u0433\u0435\u0440" },
-          // play — output, но визуально слева + зелёный (косметика: метафора
-          // «слой как объект-вход» для Animation; data flow по-прежнему
-          // Animation→Layer, side/tone — только override позиции/цвета).
-          { name: "play", dir: "output", dataType: "trigger", side: "left", tone: "green", labelVisible: true, label: "\u041B\u043E\u0442\u0442\u0438/Sprite" },
-          // Стреляет когда play-ветка завершила spec.cycles циклов (Promise.all
-          // по всем Layer'ам, до которых дотягивается play). Для loop-режима
-          // анимация продолжает крутиться — cycles влияет ТОЛЬКО на момент done.
-          { name: "done", dir: "output", dataType: "trigger", labelVisible: true, label: "\u041A\u043E\u043D\u0435\u0446" }
-        ],
-        template: {
-          // Body с режимом — одна строка вместо compact, чтобы два output-сокета
-          // (play, done) не слипались на одной линии. Вертикальный паддинг body
-          // задаётся CSS-ом `.sm-node--animation .sm-node-body`.
-          title: (n) => n.cycles > 1 ? `${n.mode} \xB7 ${n.cycles} \u0446\u0438\u043A\u043B\u0430` : n.mode,
-          subtitle: () => null,
-          badge: () => null
-        },
-        defaults() {
-          return { kind: NODE_ANIMATION, mode: "once", cycles: 1 };
-        },
-        toViewModel(id, spec) {
-          const cycles = Number.isInteger(spec.cycles) && spec.cycles >= 1 ? spec.cycles : 1;
-          return {
-            id,
-            kind: NODE_ANIMATION,
-            mode: spec.mode === "loop" ? "loop" : "once",
-            cycles,
-            label: "\u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F"
-          };
-        },
-        propsFields: [
-          {
-            type: "select",
-            key: "mode",
-            label: "\u0420\u0435\u0436\u0438\u043C",
-            options: [
-              { value: "once", label: "\u0420\u0430\u0437\u043E\u0432\u0430\u044F" },
-              { value: "loop", label: "\u0426\u0438\u043A\u043B" }
-            ]
-          },
-          { type: "number", key: "cycles", label: "\u0426\u0438\u043A\u043B\u043E\u0432", min: 1, step: 1 }
-        ],
-        propsHint: "\u0426\u0438\u043A\u043B\u043E\u0432 \u2014 \u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0440\u0430\u0437 \u043F\u0440\u043E\u0438\u0433\u0440\u0430\u0442\u044C \u043F\u0435\u0440\u0435\u0434 \u0441\u043E\u0431\u044B\u0442\u0438\u0435\u043C \xAB\u041A\u043E\u043D\u0435\u0446\xBB. \u0414\u043B\u044F loop \u0430\u043D\u0438\u043C\u0430\u0446\u0438\u044F \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0430\u0435\u0442 \u043A\u0440\u0443\u0442\u0438\u0442\u044C\u0441\u044F, \xAB\u041A\u043E\u043D\u0435\u0446\xBB \u0441\u0442\u0440\u0435\u043B\u044F\u0435\u0442 \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u043F\u043E\u0441\u043B\u0435 N \u0446\u0438\u043A\u043B\u043E\u0432.",
-        // Pure compile — `event-graph/compileNodes.js`.
-        // Animation: play без 'done' — fire-and-forget ctx в play-ветку. С 'done' —
-        // сбор layerId'ов через ctx.collectLayer, подписка на layerCycleBus на
-        // cycles циклов, done-ветка после Promise.all.
-        compile: NODE_COMPILERS[NODE_ANIMATION]
-      },
-      [NODE_ACTION]: {
-        typeLabel: "Action",
-        layoutColumn: 1,
-        sockets: [
-          {
-            name: "trigger",
-            dir: "input",
-            dataType: "trigger",
-            accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION],
-            label: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C"
-          },
-          // done — для последовательностей: Action → Action / Action → Layer.
-          // T8 завершит цепочку когда anim доиграет до конца (playMode === 'once'
-          // или после первого цикла для loop).
-          { name: "done", dir: "output", dataType: "trigger", label: "\u041A\u043E\u043D\u0435\u0446" }
-        ],
-        template: {
-          title: (n) => n.actionName || "\u2014 Action \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D \u2014",
-          subtitle: () => null,
-          badge: () => null
-        },
-        defaults() {
-          return {
-            kind: NODE_ACTION,
-            actionId: null,
-            mode: "once",
-            extrapolation: "hold",
-            blending: "replace",
-            priority: 0,
-            // N3-full: дополнительные Strip-параметры.
-            reversed: "",
-            // '' = прямое; 'rev' = обратное (re→rs).
-            blendIn: 0,
-            // sec — fade-in от idle к value на старте.
-            blendOut: 0
-            // sec — fade-out от value к idle на конце.
-          };
-        },
-        toViewModel(id, spec) {
-          const a = spec.actionId ? getAction(spec.actionId) : null;
-          return {
-            id,
-            kind: NODE_ACTION,
-            actionId: spec.actionId || null,
-            actionName: a?.name || null,
-            mode: spec.mode || null,
-            extrapolation: spec.extrapolation || "hold",
-            blending: spec.blending || "replace",
-            priority: Number.isFinite(spec.priority) ? spec.priority : 0,
-            reversed: spec.reversed === "rev",
-            blendIn: Number.isFinite(spec.blendIn) ? spec.blendIn : 0,
-            blendOut: Number.isFinite(spec.blendOut) ? spec.blendOut : 0,
-            label: "Action"
-          };
-        },
-        propsFields: [
-          { type: "actionSelect", key: "actionId", label: "Action" },
-          {
-            type: "select",
-            key: "mode",
-            label: "\u041F\u0440\u043E\u0438\u0433\u0440\u044B\u0432\u0430\u043D\u0438\u0435",
-            options: [
-              { value: "once", label: "\u041E\u0434\u0438\u043D \u0440\u0430\u0437" },
-              { value: "loop", label: "\u041F\u043E\u0432\u0442\u043E\u0440\u044F\u0442\u044C" }
-            ]
-          },
-          {
-            type: "select",
-            key: "extrapolation",
-            label: "\u0412\u043D\u0435 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D\u0430",
-            options: [
-              { value: "hold", label: "\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C" },
-              { value: "nothing", label: "\u0421\u0431\u0440\u0430\u0441\u044B\u0432\u0430\u0442\u044C" }
-            ]
-          },
-          {
-            type: "select",
-            key: "blending",
-            label: "\u0421\u043C\u0435\u0448\u0438\u0432\u0430\u043D\u0438\u0435",
-            options: [
-              { value: "replace", label: "\u0417\u0430\u043C\u0435\u043D\u044F\u0442\u044C" },
-              { value: "add", label: "\u0414\u043E\u0431\u0430\u0432\u043B\u044F\u0442\u044C" }
-            ]
-          },
-          { type: "number", key: "priority", label: "\u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442", step: 1 },
-          {
-            type: "select",
-            key: "reversed",
-            label: "\u041D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435",
-            options: [
-              { value: "", label: "\u041F\u0440\u044F\u043C\u043E\u0435" },
-              { value: "rev", label: "\u041E\u0431\u0440\u0430\u0442\u043D\u043E\u0435" }
-            ]
-          },
-          { type: "number", key: "blendIn", label: "\u041F\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434 (\u0441\u0435\u043A)", min: 0, step: 0.05 },
-          { type: "number", key: "blendOut", label: "\u041F\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u044B\u0445\u043E\u0434 (\u0441\u0435\u043A)", min: 0, step: 0.05 }
-        ],
-        // Группировка полей по категориям. Action — единственная нода с
-        // достаточно полей чтобы их сворачивать; остальные рендерятся плоско.
-        propsCategories: [
-          { name: "\u041E\u0441\u043D\u043E\u0432\u043D\u043E\u0435", keys: ["actionId", "mode"] },
-          { name: "\u041C\u0438\u043A\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435", keys: ["blending", "priority"] },
-          { name: "\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E", keys: ["extrapolation", "reversed", "blendIn", "blendOut"], collapsed: true }
-        ],
-        propsHint: "\u041F\u0440\u043E\u0438\u0433\u0440\u044B\u0432\u0430\u043D\u0438\u0435 \u2014 \u0438\u0433\u0440\u0430\u0442\u044C \u043E\u0434\u0438\u043D \u0440\u0430\u0437 \u0438\u043B\u0438 \u0437\u0430\u0446\u0438\u043A\u043B\u0438\u0442\u044C. \u0412\u043D\u0435 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D\u0430: \u0443\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043A\u0440\u0430\u0439\u043D\u0438\u0439 \u043A\u0430\u0434\u0440 \u0438\u043B\u0438 \u0441\u0431\u0440\u0430\u0441\u044B\u0432\u0430\u0442\u044C \u0432 idle. \u0421\u043C\u0435\u0448\u0438\u0432\u0430\u043D\u0438\u0435: \u0437\u0430\u043C\u0435\u043D\u044F\u0442\u044C idle \u0438\u043B\u0438 \u043F\u0440\u0438\u0431\u0430\u0432\u043B\u044F\u0442\u044C. \u041F\u0440\u0438\u043E\u0440\u0438\u0442\u0435\u0442: \u043F\u0440\u0438 \u043D\u0430\u0441\u043B\u043E\u0435\u043D\u0438\u0438 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0432\u044B\u0448\u0435. \u041D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435: \u043E\u0431\u0440\u0430\u0442\u043D\u043E\u0435 \u0438\u0433\u0440\u0430\u0435\u0442 \u0441 \u043A\u043E\u043D\u0446\u0430. \u041F\u043B\u0430\u0432\u043D\u044B\u0439 \u0432\u0445\u043E\u0434/\u0432\u044B\u0445\u043E\u0434: crossfade \u0441 idle \u043D\u0430 \u0433\u0440\u0430\u043D\u0438\u0446\u0430\u0445.",
-        // Pure compile — `event-graph/compileNodes.js`. Запускает Action по id
-        // через api.playAction; default mode 'once' для event-цепочек.
-        compile: NODE_COMPILERS[NODE_ACTION]
-      },
-      [NODE_LAYER]: {
-        typeLabel: "\u0421\u043B\u043E\u0439",
-        layoutColumn: 3,
-        sockets: [
-          // play — input, но визуально справа + зелёный (косметика: парный с
-          // Animation.play.left — чтобы связь Animation→Layer выглядела как
-          // «layer-link», а не обычный trigger).
-          { name: "play", dir: "input", dataType: "trigger", side: "right", tone: "green", accepts: [NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION], label: "\u0418\u0433\u0440\u0430\u0442\u044C" }
-        ],
-        template: {
-          title: (n) => n.label,
-          subtitle: (n) => n.subtype || "\u2014"
-        },
-        defaults(deps) {
-          return { kind: NODE_LAYER, layerId: deps.firstPlayable()?.id || null };
-        },
-        toViewModel(id, spec, deps) {
-          return viewModelWithLayer(id, spec, deps, { typeLabel: "\u0421\u043B\u043E\u0439" });
-        },
-        propsFields: [
-          { type: "layerSelect", key: "layerId", label: "\u0410\u043D\u0438\u043C\u0438\u0440\u0443\u0435\u043C\u044B\u0439 \u0441\u043B\u043E\u0439", filter: "playable" }
-        ],
-        propsHint(n) {
-          return n.layerId ? null : "\u0412\u044B\u0431\u0435\u0440\u0438 Lottie \u0438\u043B\u0438 PNG \u0441\u043E \u0441\u043F\u0440\u0430\u0439\u0442\u043E\u043C.";
-        },
-        // Pure compile — `event-graph/compileNodes.js`. Терминал: вызывает
-        // playByLayerId(ctx.mode); если Animation 'done' собирает layerId'ы — Layer
-        // регистрируется через ctx.collectLayer.
-        compile: NODE_COMPILERS[NODE_LAYER]
-      },
-      // IA-NODE-IN-PARENT-GRAPH (2026-05-13). Нода-приёмник триггеров interactive-
-      // animation слоя. Динамические input-сокеты по `L.triggers` выбранного слоя
-      // (через `getSockets`). Compile отправляет `ia-trigger` postMessage в
-      // iframe выбранного слоя (через `api.routeIaTrigger`). Out-сокетов нет
-      // (out-события из IA наружу — решим в Кругу 4+).
-      [NODE_INTERACTIVE_ANIMATION]: {
-        typeLabel: "IA-\u0441\u043B\u043E\u0439",
-        // Колонка 3 как NODE_LAYER — IA-нода тоже terminal (sink), её удобно
-        // помещать в правую крайнюю колонку графа. Layer и IA-нода в одной
-        // колонке: разные kind'ы (разные akcent header'а + иконка), но
-        // одинаковая «семантика конца цепочки» → одинаковая X-координата.
-        layoutColumn: 3,
-        // Статические сокеты пусто — реальные считаются динамически от
-        // triggers выбранного IA-ассета. См. getSockets.
-        sockets: (
-          /** @type {import('./model.js').SocketSpec[]} */
-          []
-        ),
-        /**
-         * @param {import('../../core/index.js').EventGraphNode} spec
-         * @param {{ layerById?: Map<string, import('../../core/index.js').Layer> }} [deps]
-         * @returns {import('./model.js').SocketSpec[]}
-         */
-        getSockets(spec, deps) {
-          const layerId = spec && /** @type {any} */
-          spec.layerId;
-          if (!layerId) return [];
-          const L = deps && deps.layerById && deps.layerById.get(layerId) ? deps.layerById.get(layerId) : getLayerByIdAnywhere(layerId);
-          const triggers = _readIaTriggers(L);
-          if (triggers.length === 0) return [];
-          const out = triggers.map((name) => (
-            /** @type {import('./model.js').SocketSpec} */
-            {
-              name,
-              dir: "input",
-              dataType: "trigger",
-              labelVisible: true,
-              accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION],
-              label: name
-            }
-          ));
-          return out;
-        },
-        template: {
-          title: (n) => n.label,
-          // Subtitle — слово «триггеры» (количество видно по сокетам справа).
-          subtitle: () => "\u0442\u0440\u0438\u0433\u0433\u0435\u0440\u044B"
-        },
-        defaults() {
-          return { kind: NODE_INTERACTIVE_ANIMATION, layerId: null };
-        },
-        toViewModel(id, spec, deps) {
-          const L = spec.layerId ? deps.layerById.get(spec.layerId) : null;
-          return {
-            id,
-            kind: spec.kind,
-            layerId: spec.layerId || null,
-            label: L ? L.name || L.id : "\u2014 IA-\u0441\u043B\u043E\u0439 \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D",
-            subtype: L ? "\u0418\u043D\u0442\u0435\u0440\u0430\u043A\u0442\u0438\u0432\u043D\u0430\u044F" : "\u2014",
-            typeLabel: "IA-\u0441\u043B\u043E\u0439"
-          };
-        },
-        propsFields: [
-          { type: "layerSelect", key: "layerId", label: "IA-\u0441\u043B\u043E\u0439", filter: "interactiveAnimation" },
-          // Test-кнопки для удобства проверки в Play-mode: те же триггеры что
-          // в floating iaTestPanel, только привязаны к выбранной IA-ноде.
-          // Видны при выбранном слое и наличии триггеров; срабатывают через
-          // postToPreview (нужен запущенный Preview). Скрываются если триггеров
-          // нет.
-          {
-            type: "iaTestButtons",
-            key: "layerId",
-            label: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0442\u0440\u0438\u0433\u0433\u0435\u0440\u043E\u0432",
-            visibleWhen: (n) => !!n.layerId
-          }
-        ],
-        propsHint(n) {
-          if (!n.layerId) return "\u0412\u044B\u0431\u0435\u0440\u0438 IA-\u0441\u043B\u043E\u0439 \u2014 \u043D\u0430 \u043D\u043E\u0434\u0435 \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u0441\u043E\u043A\u0435\u0442\u044B \u043F\u043E \u0435\u0433\u043E \u0442\u0440\u0438\u0433\u0433\u0435\u0440\u0430\u043C.";
-          return "\u0422\u0440\u0438\u0433\u0433\u0435\u0440\u044B \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u0433\u043E \u0441\u043B\u043E\u044F \u2014 \u044D\u0442\u043E \u0432\u0445\u043E\u0434\u044B \u043D\u043E\u0434\u044B. \u0421\u043E\u0435\u0434\u0438\u043D\u0438 Event-\u043D\u043E\u0434\u0430 / Action / \u0410\u043D\u0438\u043C\u0430\u0446\u0438\u044F \u0441 \u0441\u043E\u043A\u0435\u0442\u043E\u043C \u2192 \u0432 Play-mode \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 trigger \u0432\u043D\u0443\u0442\u0440\u0438 IA.";
-        },
-        // Pure compile — `event-graph/compileNodes.js`. IA-нода — terminal:
-        // routeIaTrigger(spec.layerId, ctx._targetSocket) — имя сокета = имя
-        // триггера IA-слоя.
-        compile: NODE_COMPILERS[NODE_INTERACTIVE_ANIMATION]
-      },
-      // Stage 6 эпика dr-player-v1 (2026-05-23). Emit-event — terminal sink,
-      // отправляет out-event наружу к разработчику ok.ru (или любому хосту).
-      // Один input-сокет (по сигналу), два поля свойств: имя out-event'а и
-      // опциональный payload (статичный JSON). При срабатывании compile зовёт
-      // `api.emitOut(name, payload)` — в dr-player это превращается в emit
-      // `event:<name>` к listener'ам разработчика.
-      [NODE_EMIT_EVENT]: {
-        typeLabel: "Emit event",
-        // Колонка 3 — как Layer/IA-нода (terminal sink), удобно держать в правой
-        // крайней колонке.
-        layoutColumn: 3,
-        sockets: [
-          {
-            name: "trigger",
-            dir: "input",
-            dataType: "trigger",
-            accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION],
-            label: "\u0421\u0438\u0433\u043D\u0430\u043B"
-          }
-        ],
-        template: {
-          title: (n) => n.name || "\u2014 \u0438\u043C\u044F \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u043E",
-          subtitle: () => "out-event"
-        },
-        defaults() {
-          return { kind: NODE_EMIT_EVENT, name: "", payload: "" };
-        },
-        toViewModel(id, spec) {
-          const name = typeof spec.name === "string" ? spec.name : "";
-          const payload = typeof spec.payload === "string" ? spec.payload : "";
-          return {
-            id,
-            kind: NODE_EMIT_EVENT,
-            name,
-            payload,
-            label: name || "\u2014 \u0438\u043C\u044F \u043D\u0435 \u0437\u0430\u0434\u0430\u043D\u043E",
-            typeLabel: "Emit event"
-          };
-        },
-        propsFields: [
-          { type: "text", key: "name", label: "\u0418\u043C\u044F \u0441\u043E\u0431\u044B\u0442\u0438\u044F" },
-          { type: "textarea", key: "payload", label: "Payload (JSON, \u043E\u043F\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u043E)" }
-        ],
-        propsHint: '\u0421\u0442\u0440\u0435\u043B\u044F\u0435\u0442 \u043D\u0430\u0440\u0443\u0436\u0443 \u0441\u043E\u0431\u044B\u0442\u0438\u044F `event:<\u0438\u043C\u044F>` \u043F\u0440\u0438 \u0441\u0440\u0430\u0431\u0430\u0442\u044B\u0432\u0430\u043D\u0438\u0438. Payload \u2014 \u0441\u0442\u0430\u0442\u0438\u0447\u043D\u044B\u0439 JSON, \u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u0440\u0430\u0437\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0443 \u0447\u0435\u0440\u0435\u0437 `player.on("event:<\u0438\u043C\u044F>", cb)`. \u0415\u0441\u043B\u0438 payload \u043F\u0443\u0441\u0442\u043E\u0439 \u0438\u043B\u0438 \u043D\u0435\u0432\u0430\u043B\u0438\u0434\u043D\u044B\u0439 \u2014 listener \u043F\u043E\u043B\u0443\u0447\u0438\u0442 `{ payload: null }`.',
-        compile: NODE_COMPILERS[NODE_EMIT_EVENT]
-      },
-      [NODE_DELAY]: {
-        typeLabel: "\u0417\u0430\u0434\u0435\u0440\u0436\u043A\u0430",
-        layoutColumn: 2,
-        sockets: [
-          { name: "trigger", dir: "input", dataType: "trigger", accepts: [NODE_EVENT, NODE_START, NODE_ANIMATION, NODE_DELAY, NODE_ACTION], label: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C" },
-          { name: "done", dir: "output", dataType: "trigger", label: "\u041A\u043E\u043D\u0435\u0446" }
-        ],
-        template: {
-          // Body показывает ms — чтобы нода не была плоским header-pill'ом и
-          // высота совпадала с остальными в цепочке.
-          title: (n) => `${n.ms} \u043C\u0441`,
-          subtitle: () => null,
-          badge: () => null
-        },
-        defaults() {
-          return { kind: NODE_DELAY, ms: 500 };
-        },
-        toViewModel(id, spec) {
-          const ms = Number.isFinite(spec.ms) ? Math.max(0, Math.floor(spec.ms)) : 500;
-          return { id, kind: NODE_DELAY, ms, label: "\u0417\u0430\u0434\u0435\u0440\u0436\u043A\u0430" };
-        },
-        propsFields: [
-          { type: "number", key: "ms", label: "\u041C\u0438\u043B\u043B\u0438\u0441\u0435\u043A\u0443\u043D\u0434\u044B", min: 0, step: 50 }
-        ],
-        propsHint: "\u0427\u0435\u0440\u0435\u0437 \u0443\u043A\u0430\u0437\u0430\u043D\u043D\u043E\u0435 \u0432\u0440\u0435\u043C\u044F \u0441\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0432\u0441\u0435 \u0438\u0441\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u0432\u0435\u0442\u043A\u0438.",
-        // Pure compile — `event-graph/compileNodes.js`. setTimeout(ctx.ms) обёртка
-        // вокруг детей.
-        compile: NODE_COMPILERS[NODE_DELAY]
-      }
-    };
-    KIND_DOT_COLOR = {
-      [NODE_EVENT]: "#6490ff",
-      [NODE_START]: "#a78bfa",
-      [NODE_ANIMATION]: "#a78bfa",
-      [NODE_ACTION]: "#ec4899",
-      [NODE_DELAY]: "#94a3b8",
-      [NODE_LAYER]: "#4ade80",
-      // IA-NODE: тот же accent что у `.layer-type-badge--interactive-animation`
-      // в editor.css (orange `#fb923c`) — узнаваемо и не сливается с
-      // Animation/Layer/Action.
-      [NODE_INTERACTIVE_ANIMATION]: "#fb923c",
-      // Emit-event (Stage 6): зелёный — символ «исходящий event». Не путать с
-      // Layer.play.green (light-green `#4ade80`); Emit чуть темнее (`#10b981`).
-      [NODE_EMIT_EVENT]: "#10b981"
-    };
-    setNodeRegistry(
-      /** @type {import('./model.js').NodeRegistry} */
-      /** @type {unknown} */
-      NODE_TYPES
-    );
-  }
-});
-
-// js/event-graph/dock/edges.js
-var init_edges = __esm({
-  "js/event-graph/dock/edges.js"() {
-    init_model();
-    init_nodes();
-  }
-});
-
-// js/event-graph/dock/dock.js
-var init_dock = __esm({
-  "js/event-graph/dock/dock.js"() {
-    init_model();
-    init_nodes();
-    init_edges();
-    init_core();
-    init_playController();
-    init_core();
-  }
-});
-
-// js/event-graph/index.js
-var init_event_graph = __esm({
-  "js/event-graph/index.js"() {
-    init_runtime();
-    init_compileGraph();
-    init_playController();
-    init_hintPulse();
-    init_layerCycleBus();
-    init_dock();
-    init_model();
-    init_nodes();
-    init_edges();
-  }
-});
 
 // js/dr-runtime/assetLibraryReadOnly.js
 function lookupAsset(library, assetId) {
@@ -2476,10 +1603,6 @@ function listAllAssets(library) {
   if (!library || typeof library.values !== "function") return [];
   return [...library.values()];
 }
-var init_assetLibraryReadOnly = __esm({
-  "js/dr-runtime/assetLibraryReadOnly.js"() {
-  }
-});
 
 // js/dr-runtime/deserializeIaSnapshot.js
 function _toMap(entries) {
@@ -2525,25 +1648,6 @@ function deserializeIaSnapshot(cfg) {
   const library = hydrateLibraryFromEntries(src._assets);
   return { canvas, layers, eventGraph, actions, meta, library };
 }
-var init_deserializeIaSnapshot = __esm({
-  "js/dr-runtime/deserializeIaSnapshot.js"() {
-    init_assetLibraryReadOnly();
-  }
-});
-
-// js/dr-runtime/index.js
-var init_index = __esm({
-  "js/dr-runtime/index.js"() {
-    init_anim_runtime();
-    init_event_graph();
-    init_event_graph();
-    init_event_graph();
-    init_core();
-    init_deserializeIaSnapshot();
-    init_assetLibraryReadOnly();
-  }
-});
-init_index();
 export {
   addCycleListener,
   applyCascadeToLayer,
